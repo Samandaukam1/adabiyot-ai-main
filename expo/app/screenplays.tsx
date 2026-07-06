@@ -1,555 +1,354 @@
+import { Image } from "expo-image";
+import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
+import { ArrowLeft, Clapperboard, Eye, Film, Shield } from "lucide-react-native";
+import React, { useEffect, useMemo, useState } from "react";
 import {
-  ArrowLeft,
-  Baby,
-  BookOpen,
-  Building2,
-  Camera,
-  ChevronRight,
-  Clapperboard,
-  Drama,
-  Flag,
-  GraduationCap,
-  Play,
-  School,
-  Sparkles,
-  Smartphone,
-  Theater,
-  Tv,
-  Video,
-} from "lucide-react-native";
-import React, { useMemo, useState } from "react";
-import { Dimensions, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+  ActivityIndicator,
+  Dimensions,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { palette } from "@/constants/colors";
+import type { AppTheme } from "@/constants/colors";
+import { formatUzs } from "@/constants/tariffs";
 import { FONT, PressableScale, Screen } from "@/components/ui";
+import { usePublishedScreenplays } from "@/hooks/useScreenplays";
+import { usePullToRefresh } from "@/hooks/usePullToRefresh";
+import type { ScreenplayCard } from "@/lib/screenplays";
+import { useTheme } from "@/providers/ThemeProvider";
 
 const { width: SCREEN_W } = Dimensions.get("window");
+const GRID_GAP = 12;
+const GRID_PAD = 18;
+const CARD_W = (SCREEN_W - GRID_PAD * 2 - GRID_GAP) / 2;
 
-type IconComponent = React.ComponentType<{ color: string; size: number; strokeWidth?: number }>;
-
-interface ScreenplaySubcategory {
-  id: string;
-  title: string;
-  icon: IconComponent;
-}
-
-interface ScreenplayGroup {
-  id: string;
-  title: string;
-  subtitle: string;
-  icon: IconComponent;
-  subcategories: ScreenplaySubcategory[];
-}
-
-const GROUPS: ScreenplayGroup[] = [
-  {
-    id: "kino-video",
-    title: "Kino va video",
-    subtitle: "Film, serial va qisqa video matnlari",
-    icon: Camera,
-    subcategories: [
-      { id: "kino", title: "Kino ssenariylari", icon: Clapperboard },
-      { id: "multfilm", title: "Multfilm ssenariylari", icon: Sparkles },
-      { id: "mobil-serial", title: "Mobil serial ssenariylari", icon: Smartphone },
-      { id: "vayn", title: "Vayn ssenariylari", icon: Video },
-      { id: "serial", title: "Serial ssenariylari", icon: Tv },
-    ],
-  },
-  {
-    id: "sahna-spektakl",
-    title: "Sahna va spektakl",
-    subtitle: "Teatr, dialog va sahna ko'rinishi",
-    icon: Theater,
-    subcategories: [
-      { id: "spektakl", title: "Spektakl ssenariylari", icon: Drama },
-      { id: "sahna-korinishi", title: "Sahna ko'rinishi ssenariylari", icon: Theater },
-    ],
-  },
-  {
-    id: "talimiy",
-    title: "Ta'limiy tadbirlar",
-    subtitle: "Maktab, bog'cha va OTM dasturlari",
-    icon: School,
-    subcategories: [
-      { id: "maktab", title: "Maktab tadbiri ssenariylari", icon: BookOpen },
-      { id: "bogcha", title: "Bog'cha tadbiri ssenariylari", icon: Baby },
-      { id: "otm", title: "OTM tadbiri ssenariylari", icon: GraduationCap },
-    ],
-  },
-  {
-    id: "rasmiy",
-    title: "Rasmiy tadbirlar",
-    subtitle: "Davlat va protokol tadbirlari",
-    icon: Building2,
-    subcategories: [
-      { id: "davlat", title: "Davlat tadbiri ssenariylari", icon: Flag },
-    ],
-  },
-];
+const ALL_GENRES = "Hammasi";
 
 export default function ScreenplaysHub() {
   const insets = useSafeAreaInsets();
-  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
-  const [selectedSubcategoryId, setSelectedSubcategoryId] = useState<string | null>(null);
+  const { colors: c, isDark } = useTheme();
+  const styles = useMemo(() => createStyles(c, isDark), [c, isDark]);
+  const { screenplays, loading, error, refetch } = usePublishedScreenplays();
+  const refresh = usePullToRefresh(refetch);
+  const [genre, setGenre] = useState<string>(ALL_GENRES);
 
-  const selectedGroup = useMemo(
-    () => GROUPS.find((group) => group.id === selectedGroupId) ?? null,
-    [selectedGroupId]
+  const genres = useMemo(() => {
+    const set = new Set<string>();
+    for (const item of screenplays) if (item.genre) set.add(item.genre);
+    return [ALL_GENRES, ...Array.from(set)];
+  }, [screenplays]);
+
+  const filtered = useMemo(
+    () => (genre === ALL_GENRES ? screenplays : screenplays.filter((s) => s.genre === genre)),
+    [screenplays, genre]
   );
-  const selectedSubcategory = useMemo(
-    () =>
-      selectedGroup?.subcategories.find((subcategory) => subcategory.id === selectedSubcategoryId) ??
-      null,
-    [selectedGroup, selectedSubcategoryId]
-  );
 
-  const selectGroup = (groupId: string) => {
-    setSelectedGroupId(groupId);
-    const group = GROUPS.find((item) => item.id === groupId);
-    setSelectedSubcategoryId(group?.subcategories[0]?.id ?? null);
-  };
+  useEffect(() => {
+    console.log("[ScreenplaysPage] mounted");
+  }, []);
 
-  const resetGroup = () => {
-    setSelectedGroupId(null);
-    setSelectedSubcategoryId(null);
-  };
+  useEffect(() => {
+    console.log("[ScreenplaysPage] count:", screenplays?.length);
+    console.log("[ScreenplaysPage] data:", screenplays);
+    console.log("[ScreenplaysPage] error:", error);
+  }, [error, screenplays]);
 
   return (
     <Screen>
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingTop: insets.top + 12, paddingBottom: 130 }}
+        refreshControl={
+          <RefreshControl refreshing={refresh.refreshing} onRefresh={refresh.onRefresh} tintColor={c.primary} />
+        }
       >
         <View style={styles.header}>
           <Pressable onPress={() => router.back()} style={styles.backButton}>
-            <ArrowLeft color={palette.text} size={20} />
+            <ArrowLeft color={c.text} size={20} />
           </Pressable>
           <View style={styles.headerCopy}>
             <Text style={styles.kicker}>SSENARIYLAR</Text>
             <Text style={styles.title}>Ijodiy ssenariy markazi</Text>
             <Text style={styles.subtitle}>
-              Kerakli yo'nalishni tanlang, keyin mos ssenariy turiga o'ting.
+              Kino, sahna va tadbir ssenariylarini o'qing — har biri sahnama-sahna tayyor.
             </Text>
           </View>
         </View>
 
-        {!selectedGroup ? (
-          <>
-            <View style={styles.sectionHead}>
-              <Text style={styles.sectionTitle}>Asosiy yo'nalishlar</Text>
-              <Text style={styles.sectionHint}>4 ta guruh</Text>
-            </View>
-            <View style={styles.groupGrid}>
-              {GROUPS.map((group) => (
-                <MainGroupCard key={group.id} group={group} onPress={() => selectGroup(group.id)} />
-              ))}
-            </View>
-          </>
-        ) : (
-          <>
-            <View style={styles.breadcrumb}>
-              <Pressable onPress={resetGroup} hitSlop={10}>
-                <Text style={styles.breadcrumbBack}>Asosiy guruhlar</Text>
-              </Pressable>
-              <ChevronRight color={palette.textMuted} size={15} />
-              <Text style={styles.breadcrumbCurrent} numberOfLines={1}>
-                {selectedGroup.title}
-              </Text>
-            </View>
+        <Text style={{ color: "red", paddingHorizontal: 18 }}>
+          DEBUG screenplays: {screenplays.length} | loading: {String(loading)} | error: {error || "none"}
+        </Text>
 
-            <SelectedGroupHero group={selectedGroup} onChange={resetGroup} />
-
-            <View style={styles.sectionHead}>
-              <Text style={styles.sectionTitle}>Ichki bo'limlar</Text>
-              <Text style={styles.sectionHint}>{selectedGroup.subcategories.length} ta tur</Text>
-            </View>
-
-            <View style={styles.subGrid}>
-              {selectedGroup.subcategories.map((subcategory) => (
-                <SubcategoryCard
-                  key={subcategory.id}
-                  subcategory={subcategory}
-                  active={selectedSubcategoryId === subcategory.id}
-                  onPress={() => setSelectedSubcategoryId(subcategory.id)}
-                />
-              ))}
-            </View>
-
-            {selectedSubcategory ? (
-              <View style={styles.actionPanel}>
-                <View style={styles.actionIcon}>
-                  <selectedSubcategory.icon color={palette.primary} size={20} strokeWidth={2.2} />
-                </View>
-                <View style={styles.actionTextWrap}>
-                  <Text style={styles.actionTitle}>{selectedSubcategory.title}</Text>
-                  <Text style={styles.actionText}>
-                    Tanlangan yo'nalish asosida mos ssenariylar va namunalar ko'rsatiladi.
-                  </Text>
-                </View>
-                <PressableScale
-                  onPress={() => router.push({ pathname: "/screenplay/[id]", params: { id: "b9" } })}
-                  style={styles.actionButton}
+        {genres.length > 1 ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.chipsRow}
+          >
+            {genres.map((g) => {
+              const active = g === genre;
+              return (
+                <Pressable
+                  key={g}
+                  onPress={() => setGenre(g)}
+                  style={[styles.chip, active && styles.chipActive]}
                 >
-                  <Play color="#fff" size={15} fill="#fff" />
-                </PressableScale>
-              </View>
-            ) : null}
-          </>
+                  <Text style={[styles.chipText, active && styles.chipTextActive]}>{g}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        ) : null}
+
+        {loading && screenplays.length === 0 ? (
+          <View style={styles.loadingState}>
+            <ActivityIndicator color={c.primary} />
+            <Text style={styles.stateText}>Ssenariylar yuklanmoqda…</Text>
+          </View>
+        ) : screenplays.length === 0 ? (
+          <View style={styles.emptyState}>
+            <View style={styles.emptyIcon}>
+              <Clapperboard color={c.primary} size={30} strokeWidth={1.8} />
+            </View>
+            <Text style={styles.emptyTitle}>
+              {error ? "Ssenariylarni yuklab bo'lmadi" : "Hali ssenariylar mavjud emas"}
+            </Text>
+            <Text style={styles.emptyText}>
+              {error
+                ? "Internetni tekshirib, sahifani yangilang."
+                : "Yangi ssenariylar chiqishi bilan shu yerda ko'rinadi."}
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.grid}>
+            {(filtered.length > 0 ? filtered : screenplays).map((item) => (
+              <ScreenplayGridCard key={item.id} item={item} c={c} styles={styles} />
+            ))}
+          </View>
         )}
       </ScrollView>
     </Screen>
   );
 }
 
-function MainGroupCard({ group, onPress }: { group: ScreenplayGroup; onPress: () => void }) {
-  const Icon = group.icon;
+type StylesType = ReturnType<typeof createStyles>;
 
-  return (
-    <PressableScale onPress={onPress} style={styles.groupCard}>
-      <View style={styles.groupTopRow}>
-        <View style={styles.groupIcon}>
-          <Icon color={palette.primary} size={24} strokeWidth={2.1} />
-        </View>
-        <ChevronRight color={palette.primary} size={19} />
-      </View>
-      <Text style={styles.groupTitle}>{group.title}</Text>
-      <Text style={styles.groupSubtitle} numberOfLines={2}>
-        {group.subtitle}
-      </Text>
-      <View style={styles.groupFoot}>
-        <Text style={styles.groupCount}>{group.subcategories.length} tur</Text>
-      </View>
-    </PressableScale>
-  );
-}
-
-function SelectedGroupHero({ group, onChange }: { group: ScreenplayGroup; onChange: () => void }) {
-  const Icon = group.icon;
-
-  return (
-    <View style={styles.selectedHero}>
-      <View style={styles.selectedIcon}>
-        <Icon color="#fff" size={26} strokeWidth={2.1} />
-      </View>
-      <View style={styles.selectedTextWrap}>
-        <Text style={styles.selectedTitle}>{group.title}</Text>
-        <Text style={styles.selectedSubtitle}>{group.subtitle}</Text>
-      </View>
-      <Pressable onPress={onChange} style={styles.changeButton}>
-        <Text style={styles.changeButtonText}>Almashtirish</Text>
-      </Pressable>
-    </View>
-  );
-}
-
-function SubcategoryCard({
-  subcategory,
-  active,
-  onPress,
+function ScreenplayGridCard({
+  item,
+  c,
+  styles,
 }: {
-  subcategory: ScreenplaySubcategory;
-  active: boolean;
-  onPress: () => void;
+  item: ScreenplayCard;
+  c: AppTheme;
+  styles: StylesType;
 }) {
-  const Icon = subcategory.icon;
-
   return (
     <PressableScale
-      onPress={onPress}
-      style={active ? [styles.subCard, styles.subCardActive] : styles.subCard}
+      onPress={() => router.push(`/screenplay/${item.id}`)}
+      style={styles.card}
     >
-      <View style={active ? [styles.subIcon, styles.subIconActive] : styles.subIcon}>
-        <Icon color={active ? "#fff" : palette.primary} size={18} strokeWidth={2.1} />
+      <View style={styles.poster}>
+        {item.coverUrl ? (
+          <Image source={{ uri: item.coverUrl }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
+        ) : (
+          <View style={[StyleSheet.absoluteFillObject, styles.posterFallback]}>
+            <Film color={c.primary} size={30} strokeWidth={1.6} />
+          </View>
+        )}
+        <LinearGradient
+          colors={["transparent", "rgba(6,14,9,0.72)"]}
+          style={StyleSheet.absoluteFillObject}
+        />
+        <View style={styles.badge}>
+          <Film color="#fff" size={11} />
+          <Text style={styles.badgeText}>SSENARIY</Text>
+        </View>
+        <View style={styles.priceTag}>
+          <Text style={styles.priceTagText}>{item.isFree ? "Bepul" : formatUzs(item.price)}</Text>
+        </View>
+        {item.ageRating ? (
+          <View style={styles.ageTag}>
+            <Shield color="#fff" size={10} />
+            <Text style={styles.ageTagText}>{item.ageRating}</Text>
+          </View>
+        ) : null}
       </View>
-      <Text style={active ? [styles.subTitle, styles.subTitleActive] : styles.subTitle} numberOfLines={2}>
-        {subcategory.title}
-      </Text>
+      <Text style={styles.cardTitle} numberOfLines={2}>{item.title}</Text>
+      {item.description ? (
+        <Text style={styles.cardDescription} numberOfLines={2}>{item.description}</Text>
+      ) : null}
+      <Text style={styles.cardMeta} numberOfLines={1}>{item.author}</Text>
+      <View style={styles.cardFoot}>
+        <Text style={styles.cardGenre} numberOfLines={1}>{item.genre}</Text>
+        {item.readCount > 0 ? (
+          <View style={styles.readRow}>
+            <Eye color={c.textMuted} size={12} />
+            <Text style={styles.readText}>{formatCount(item.readCount)}</Text>
+          </View>
+        ) : null}
+      </View>
     </PressableScale>
   );
 }
 
-const styles = StyleSheet.create({
-  header: {
-    paddingHorizontal: 20,
-    paddingBottom: 8,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: palette.bgCard,
-    borderWidth: 1,
-    borderColor: palette.border,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 18,
-  },
-  headerCopy: {
-    backgroundColor: "rgba(255,255,255,0.60)",
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: palette.border,
-    padding: 18,
-  },
-  kicker: {
-    color: palette.primary,
-    fontSize: 10,
-    fontWeight: "900",
-    letterSpacing: 1.5,
-  },
-  title: {
-    color: palette.text,
-    fontFamily: FONT.serif,
-    fontSize: 31,
-    lineHeight: 36,
-    fontWeight: "800",
-    marginTop: 8,
-    letterSpacing: 0,
-  },
-  subtitle: {
-    color: palette.textDim,
-    fontSize: 14,
-    lineHeight: 21,
-    marginTop: 8,
-    fontWeight: "500",
-  },
-  sectionHead: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 20,
-    marginTop: 24,
-    marginBottom: 12,
-  },
-  sectionTitle: {
-    color: palette.text,
-    fontSize: 19,
-    fontFamily: FONT.serif,
-    fontWeight: "800",
-    letterSpacing: 0,
-  },
-  sectionHint: {
-    color: palette.primary,
-    fontSize: 11,
-    fontWeight: "900",
-  },
-  groupGrid: {
-    paddingHorizontal: 14,
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-  },
-  groupCard: {
-    width: (SCREEN_W - 38) / 2,
-    minHeight: 176,
-    borderRadius: 20,
-    backgroundColor: palette.bgCard,
-    borderWidth: 1,
-    borderColor: palette.border,
-    padding: 15,
-    shadowColor: "#000",
-    shadowOpacity: 0.07,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 7 },
-    elevation: 3,
-  },
-  groupTopRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  groupIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 15,
-    backgroundColor: palette.soft,
-    borderWidth: 1,
-    borderColor: palette.borderStrong,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  groupTitle: {
-    color: palette.text,
-    fontSize: 16,
-    fontWeight: "900",
-    marginTop: 15,
-    lineHeight: 21,
-  },
-  groupSubtitle: {
-    color: palette.textDim,
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 6,
-    fontWeight: "500",
-  },
-  groupFoot: {
-    alignSelf: "flex-start",
-    marginTop: "auto",
-    borderRadius: 999,
-    backgroundColor: "rgba(46,125,50,0.09)",
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-  },
-  groupCount: {
-    color: palette.primary,
-    fontSize: 10,
-    fontWeight: "900",
-  },
-  breadcrumb: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    paddingHorizontal: 20,
-    marginTop: 22,
-  },
-  breadcrumbBack: {
-    color: palette.primary,
-    fontSize: 12,
-    fontWeight: "900",
-  },
-  breadcrumbCurrent: {
-    flex: 1,
-    color: palette.textMuted,
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  selectedHero: {
-    marginHorizontal: 20,
-    marginTop: 12,
-    borderRadius: 22,
-    backgroundColor: palette.primary,
-    padding: 15,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    shadowColor: palette.primary,
-    shadowOpacity: 0.16,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 9 },
-    elevation: 4,
-  },
-  selectedIcon: {
-    width: 50,
-    height: 50,
-    borderRadius: 16,
-    backgroundColor: "rgba(255,255,255,0.16)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  selectedTextWrap: {
-    flex: 1,
-    minWidth: 0,
-  },
-  selectedTitle: {
-    color: "#fff",
-    fontSize: 17,
-    fontWeight: "900",
-  },
-  selectedSubtitle: {
-    color: "rgba(255,255,255,0.78)",
-    fontSize: 12,
-    lineHeight: 17,
-    marginTop: 3,
-    fontWeight: "600",
-  },
-  changeButton: {
-    borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.16)",
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-  },
-  changeButtonText: {
-    color: "#fff",
-    fontSize: 10,
-    fontWeight: "900",
-  },
-  subGrid: {
-    paddingHorizontal: 14,
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-  },
-  subCard: {
-    width: (SCREEN_W - 38) / 2,
-    minHeight: 92,
-    borderRadius: 17,
-    backgroundColor: palette.bgCard,
-    borderWidth: 1,
-    borderColor: palette.border,
-    padding: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  subCardActive: {
-    borderColor: palette.borderStrong,
-    backgroundColor: "#FAFFFA",
-  },
-  subIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 12,
-    backgroundColor: palette.soft,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  subIconActive: {
-    backgroundColor: palette.primary,
-  },
-  subTitle: {
-    flex: 1,
-    minWidth: 0,
-    color: palette.text,
-    fontSize: 12,
-    lineHeight: 17,
-    fontWeight: "800",
-  },
-  subTitleActive: {
-    color: palette.primary,
-  },
-  actionPanel: {
-    marginHorizontal: 20,
-    marginTop: 16,
-    borderRadius: 18,
-    backgroundColor: palette.bgCard,
-    borderWidth: 1,
-    borderColor: palette.border,
-    padding: 13,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 11,
-  },
-  actionIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 14,
-    backgroundColor: palette.soft,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  actionTextWrap: {
-    flex: 1,
-    minWidth: 0,
-  },
-  actionTitle: {
-    color: palette.text,
-    fontSize: 13,
-    fontWeight: "900",
-  },
-  actionText: {
-    color: palette.textMuted,
-    fontSize: 11,
-    lineHeight: 16,
-    marginTop: 3,
-    fontWeight: "600",
-  },
-  actionButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 15,
-    backgroundColor: palette.primary,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-});
+function formatCount(value: number): string {
+  if (value >= 1000) return `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)}k`;
+  return String(value);
+}
+
+function createStyles(c: AppTheme, isDark: boolean) {
+  return StyleSheet.create({
+    header: { paddingHorizontal: 20, paddingBottom: 8 },
+    backButton: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: c.bgCard,
+      borderWidth: 1,
+      borderColor: c.border,
+      alignItems: "center",
+      justifyContent: "center",
+      marginBottom: 18,
+    },
+    headerCopy: {
+      backgroundColor: isDark ? c.bgCard : "rgba(255,255,255,0.60)",
+      borderRadius: 22,
+      borderWidth: 1,
+      borderColor: c.border,
+      padding: 18,
+    },
+    kicker: { color: c.primary, fontSize: 10, fontWeight: "900", letterSpacing: 1.5 },
+    title: {
+      color: c.text,
+      fontFamily: FONT.serif,
+      fontSize: 31,
+      lineHeight: 36,
+      fontWeight: "800",
+      marginTop: 8,
+    },
+    subtitle: { color: c.textDim, fontSize: 14, lineHeight: 21, marginTop: 8, fontWeight: "500" },
+
+    chipsRow: { paddingHorizontal: 18, gap: 8, paddingVertical: 16 },
+    chip: {
+      height: 36,
+      borderRadius: 999,
+      paddingHorizontal: 16,
+      justifyContent: "center",
+      backgroundColor: c.bgCard,
+      borderWidth: 1,
+      borderColor: c.border,
+    },
+    chipActive: { backgroundColor: c.primary, borderColor: c.primary },
+    chipText: { color: c.textDim, fontSize: 13, fontWeight: "700" },
+    chipTextActive: { color: "#fff" },
+
+    loadingState: { alignItems: "center", gap: 12, paddingTop: 80 },
+    stateText: { color: c.textDim, fontSize: 14, fontWeight: "600" },
+
+    emptyState: { alignItems: "center", paddingTop: 70, paddingHorizontal: 40 },
+    emptyIcon: {
+      width: 72,
+      height: 72,
+      borderRadius: 36,
+      backgroundColor: c.soft,
+      alignItems: "center",
+      justifyContent: "center",
+      marginBottom: 18,
+    },
+    emptyTitle: {
+      color: c.text,
+      fontSize: 19,
+      fontFamily: FONT.serif,
+      fontWeight: "800",
+      textAlign: "center",
+    },
+    emptyText: {
+      color: c.textDim,
+      fontSize: 14,
+      lineHeight: 21,
+      textAlign: "center",
+      marginTop: 8,
+      fontWeight: "500",
+    },
+
+    grid: {
+      paddingHorizontal: GRID_PAD,
+      paddingTop: 4,
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: GRID_GAP,
+    },
+    card: { width: CARD_W },
+    poster: {
+      width: "100%",
+      aspectRatio: 0.7,
+      borderRadius: 16,
+      overflow: "hidden",
+      backgroundColor: c.soft,
+      borderWidth: 1,
+      borderColor: c.border,
+    },
+    posterFallback: { alignItems: "center", justifyContent: "center", backgroundColor: c.soft },
+    badge: {
+      position: "absolute",
+      top: 10,
+      left: 10,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      backgroundColor: "rgba(47,158,110,0.95)",
+      borderRadius: 7,
+      paddingHorizontal: 8,
+      height: 22,
+    },
+    badgeText: { color: "#fff", fontSize: 9, fontWeight: "900", letterSpacing: 0.8 },
+    priceTag: {
+      position: "absolute",
+      bottom: 10,
+      left: 10,
+      backgroundColor: "rgba(0,0,0,0.55)",
+      borderRadius: 8,
+      paddingHorizontal: 9,
+      height: 24,
+      justifyContent: "center",
+    },
+    priceTagText: { color: "#fff", fontSize: 11, fontWeight: "800" },
+    ageTag: {
+      position: "absolute",
+      top: 10,
+      right: 10,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 3,
+      backgroundColor: "rgba(0,0,0,0.5)",
+      borderRadius: 7,
+      paddingHorizontal: 7,
+      height: 22,
+    },
+    ageTagText: { color: "#fff", fontSize: 10, fontWeight: "800" },
+    cardTitle: {
+      color: c.text,
+      fontSize: 15,
+      fontWeight: "800",
+      fontFamily: FONT.serif,
+      marginTop: 10,
+      lineHeight: 20,
+    },
+    cardDescription: { color: c.textDim, fontSize: 12, lineHeight: 16, marginTop: 5, fontWeight: "500" },
+    cardMeta: { color: c.textDim, fontSize: 12, fontWeight: "600", marginTop: 3 },
+    cardFoot: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      marginTop: 6,
+    },
+    cardGenre: { color: c.primary, fontSize: 11, fontWeight: "800", flex: 1 },
+    readRow: { flexDirection: "row", alignItems: "center", gap: 3 },
+    readText: { color: c.textMuted, fontSize: 11, fontWeight: "700" },
+  });
+}

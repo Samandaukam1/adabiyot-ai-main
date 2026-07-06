@@ -4,10 +4,12 @@ import type {
   BookContentBlock,
   BookTocItem,
   MobileBook,
+  SupabasePoem,
   SupabaseBook,
 } from "@/types/database";
 import {
   mobileBookToDisplay,
+  poemToDisplay,
   type DisplayBook,
 } from "@/types/database";
 
@@ -112,8 +114,34 @@ export function useBookContent(bookId: string): UseBookContentResult {
             });
           }
 
-          // 1c. Dev fallback — any status (lets you preview drafts in development)
-          if (__DEV__) {
+          // 1c. Admin stores poems in a separate table.
+          const { data: poemData, error: poemErr } = await (supabase as any)
+            .from("poems")
+            .select("*")
+            .eq("id", bookId)
+            .eq("status", "published")
+            .single() as {
+              data: SupabasePoem | null;
+              error: { message: string; code: string; details: string; hint: string } | null;
+            };
+
+          if (cancelled) return;
+
+          if (!poemErr && poemData) {
+            console.log("✅ useBookContent: poem found in poems table (status=published)");
+            resolvedBook = poemToDisplay(poemData);
+            bookSource = "poems_published";
+          } else {
+            if (poemErr) {
+              console.warn("⚠️ useBookContent: poems(published) fetch failed:", {
+                code: poemErr.code,
+                message: poemErr.message,
+              });
+            }
+          }
+
+          // 1d. Dev fallback — any status (lets you preview drafts in development)
+          if (!resolvedBook && __DEV__) {
             console.log("🔍 useBookContent: trying books table without status filter (dev only)…");
             const { data: anyData, error: anyErr } = await (supabase as any)
               .from("books")

@@ -1,4 +1,4 @@
-import { Image } from "expo-image";
+import BookCover from "@/components/BookCover";
 import { router } from "expo-router";
 import {
   Book,
@@ -25,9 +25,10 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { palette } from "@/constants/colors";
+import type { AppTheme } from "@/constants/colors";
 import { FONT, Pill, PressableScale, Screen } from "@/components/ui";
 import { books, categories, Category, getAuthor, getBookRoute } from "@/mocks/content";
+import { useTheme } from "@/providers/ThemeProvider";
 
 const { width: SCREEN_W } = Dimensions.get("window");
 const ICONS: Record<string, React.ComponentType<{ color: string; size: number; strokeWidth?: number }>> = {
@@ -49,6 +50,8 @@ export default function ExploreScreen() {
   const [q, setQ] = useState<string>("");
   const [cat, setCat] = useState<Category | null>(null);
   const [filters, setFilters] = useState<Set<Filter>>(new Set());
+  const { colors: c } = useTheme();
+  const styles = useMemo(() => createStyles(c), [c]);
 
   const results = useMemo(() => {
     return books.filter((b) => {
@@ -82,18 +85,18 @@ export default function ExploreScreen() {
         <Text style={styles.h2}>Adabiyot olamiga sayohat</Text>
 
         <View style={styles.searchWrap}>
-          <Search color={palette.textMuted} size={18} />
+          <Search color={c.textMuted} size={18} />
           <TextInput
             style={styles.search}
             placeholder="Kitob, muallif yoki nashriyot..."
-            placeholderTextColor={palette.textMuted}
+            placeholderTextColor={c.textMuted}
             value={q}
             onChangeText={setQ}
             testID="search-input"
           />
           {q ? (
             <Pressable onPress={() => setQ("")} hitSlop={10}>
-              <X color={palette.textMuted} size={18} />
+              <X color={c.textMuted} size={18} />
             </Pressable>
           ) : null}
         </View>
@@ -112,24 +115,24 @@ export default function ExploreScreen() {
           <>
             <Text style={styles.section}>Janrlar</Text>
             <View style={styles.catsGrid}>
-              {categories.map((c) => {
-                const Icon = ICONS[c.icon] ?? Book;
+              {categories.map((catItem) => {
+                const Icon = ICONS[catItem.icon] ?? Book;
                 return (
                   <PressableScale
-                    key={c.name}
+                    key={catItem.name}
                     onPress={() => {
-                      if (c.name === "Ssenariy") {
+                      if (catItem.name === "Ssenariy") {
                         router.push("/screenplays");
                         return;
                       }
-                      setCat(c.name);
+                      setCat(catItem.name);
                     }}
                     style={styles.catCard}
                   >
-                    <View style={[styles.catIcon, { backgroundColor: `${c.color}22`, borderColor: `${c.color}55` }]}>
-                      <Icon color={c.color} size={22} strokeWidth={2} />
+                    <View style={[styles.catIcon, { backgroundColor: `${catItem.color}22`, borderColor: `${catItem.color}55` }]}>
+                      <Icon color={catItem.color} size={22} strokeWidth={2} />
                     </View>
-                    <Text style={styles.catName}>{c.name}</Text>
+                    <Text style={styles.catName}>{catItem.name}</Text>
                   </PressableScale>
                 );
               })}
@@ -141,7 +144,7 @@ export default function ExploreScreen() {
           <View style={styles.activeCatRow}>
             <Text style={styles.section}>{cat}</Text>
             <Pressable onPress={() => setCat(null)} hitSlop={10}>
-              <Text style={{ color: palette.primary, fontWeight: "600" }}>Tozalash</Text>
+              <Text style={{ color: c.primary, fontWeight: "600" }}>Tozalash</Text>
             </Pressable>
           </View>
         ) : (
@@ -161,16 +164,17 @@ export default function ExploreScreen() {
                 onPress={() => router.push(getBookRoute(item))}
                 style={styles.resItem}
               >
-                <Image source={{ uri: item.cover }} style={styles.resCover} contentFit="contain" />
-                <View style={styles.resRating}>
-                  <Star color={palette.gold} size={10} fill={palette.gold} />
-                  <Text style={styles.resRatingText}>{item.rating.toFixed(1)}</Text>
-                </View>
-                {item.free ? (
-                  <View style={styles.resBadge}>
-                    <Text style={styles.resBadgeText}>BEPUL</Text>
+                <BookCover uri={item.cover} radius={12} style={{ width: "100%" }}>
+                  <View style={styles.resRating}>
+                    <Star color={c.gold} size={10} fill={c.gold} />
+                    <Text style={styles.resRatingText}>{item.rating.toFixed(1)}</Text>
                   </View>
-                ) : null}
+                  {item.free ? (
+                    <View style={[styles.resBadge, { left: 10 + 12 }]}>
+                      <Text style={styles.resBadgeText}>BEPUL</Text>
+                    </View>
+                  ) : null}
+                </BookCover>
                 <Text numberOfLines={1} style={styles.resTitle}>{item.title}</Text>
                 <Text numberOfLines={1} style={styles.resAuthor}>{a?.name}</Text>
               </PressableScale>
@@ -189,96 +193,98 @@ export default function ExploreScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  h1: {
-    color: palette.text,
-    fontSize: 34,
-    fontFamily: FONT.serif,
-    fontWeight: "700",
-    paddingHorizontal: 20,
-    letterSpacing: -0.5,
-  },
-  h2: { color: palette.textDim, fontSize: 14, paddingHorizontal: 20, marginTop: 4 },
-  searchWrap: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    backgroundColor: palette.bgCard,
-    marginHorizontal: 20,
-    marginTop: 18,
-    height: 50,
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    borderWidth: 1,
-    borderColor: palette.border,
-  },
-  search: { flex: 1, color: palette.text, fontSize: 15 },
-  filters: { paddingHorizontal: 20, gap: 8, marginTop: 14 },
-  section: {
-    color: palette.text,
-    fontSize: 18,
-    fontWeight: "700",
-    paddingHorizontal: 20,
-    marginTop: 28,
-    marginBottom: 14,
-    letterSpacing: -0.3,
-  },
-  catsGrid: {
-    paddingHorizontal: 14,
-    flexDirection: "row",
-    flexWrap: "wrap",
-  },
-  catCard: {
-    width: (SCREEN_W - 28) / 2,
-    padding: 6,
-  },
-  catIcon: {
-    height: 96,
-    borderRadius: 16,
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 1,
-  },
-  catName: {
-    color: palette.text,
-    fontSize: 14,
-    fontWeight: "600",
-    marginTop: 8,
-    marginLeft: 4,
-  },
-  activeCatRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingRight: 20,
-  },
-  resItem: { flex: 1, margin: 6 },
-  resCover: { width: "100%", aspectRatio: 2 / 3, borderRadius: 12, backgroundColor: palette.bgCard },
-  resRating: {
-    position: "absolute",
-    top: 10,
-    right: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-    backgroundColor: "rgba(0,0,0,0.6)",
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: 10,
-  },
-  resRatingText: { color: "#fff", fontSize: 10, fontWeight: "700" },
-  resBadge: {
-    position: "absolute",
-    top: 10,
-    left: 10,
-    backgroundColor: palette.primary,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 4,
-  },
-  resBadgeText: { color: "#fff", fontSize: 9, fontWeight: "800", letterSpacing: 1 },
-  resTitle: { color: palette.text, fontSize: 13, fontWeight: "600", marginTop: 8 },
-  resAuthor: { color: palette.textMuted, fontSize: 11, marginTop: 2 },
-  empty: { paddingTop: 40, alignItems: "center" },
-  emptyText: { color: palette.textMuted, fontSize: 14 },
-});
+function createStyles(c: AppTheme) {
+  return StyleSheet.create({
+    h1: {
+      color: c.text,
+      fontSize: 34,
+      fontFamily: FONT.serif,
+      fontWeight: "700",
+      paddingHorizontal: 20,
+      letterSpacing: -0.5,
+    },
+    h2: { color: c.textDim, fontSize: 14, paddingHorizontal: 20, marginTop: 4 },
+    searchWrap: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+      backgroundColor: c.bgCard,
+      marginHorizontal: 20,
+      marginTop: 18,
+      height: 50,
+      borderRadius: 14,
+      paddingHorizontal: 16,
+      borderWidth: 1,
+      borderColor: c.border,
+    },
+    search: { flex: 1, color: c.text, fontSize: 15 },
+    filters: { paddingHorizontal: 20, gap: 8, marginTop: 14 },
+    section: {
+      color: c.text,
+      fontSize: 18,
+      fontWeight: "700",
+      paddingHorizontal: 20,
+      marginTop: 28,
+      marginBottom: 14,
+      letterSpacing: -0.3,
+    },
+    catsGrid: {
+      paddingHorizontal: 14,
+      flexDirection: "row",
+      flexWrap: "wrap",
+    },
+    catCard: {
+      width: (SCREEN_W - 28) / 2,
+      padding: 6,
+    },
+    catIcon: {
+      height: 96,
+      borderRadius: 16,
+      justifyContent: "center",
+      alignItems: "center",
+      borderWidth: 1,
+    },
+    catName: {
+      color: c.text,
+      fontSize: 14,
+      fontWeight: "600",
+      marginTop: 8,
+      marginLeft: 4,
+    },
+    activeCatRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      paddingRight: 20,
+    },
+    resItem: { flex: 1, margin: 6 },
+    resCover: { width: "100%", aspectRatio: 2 / 3, borderRadius: 12, backgroundColor: c.bgCard },
+    resRating: {
+      position: "absolute",
+      top: 10,
+      right: 10,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 3,
+      backgroundColor: "rgba(0,0,0,0.6)",
+      paddingHorizontal: 7,
+      paddingVertical: 3,
+      borderRadius: 10,
+    },
+    resRatingText: { color: "#fff", fontSize: 10, fontWeight: "700" },
+    resBadge: {
+      position: "absolute",
+      top: 10,
+      left: 10,
+      backgroundColor: c.primary,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 4,
+    },
+    resBadgeText: { color: "#fff", fontSize: 9, fontWeight: "800", letterSpacing: 1 },
+    resTitle: { color: c.text, fontSize: 13, fontWeight: "600", marginTop: 8 },
+    resAuthor: { color: c.textMuted, fontSize: 11, marginTop: 2 },
+    empty: { paddingTop: 40, alignItems: "center" },
+    emptyText: { color: c.textMuted, fontSize: 14 },
+  });
+}

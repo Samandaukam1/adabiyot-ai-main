@@ -35,10 +35,14 @@ import {
   ViewToken,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Lock, ShoppingBag } from "lucide-react-native";
 import { FONT } from "@/components/ui";
 import { palette } from "@/constants/colors";
 import { useBookContent } from "@/hooks/useBookContent";
+import { useContentAccess } from "@/hooks/usePayments";
 import { useApp } from "@/providers/AppProvider";
+import { recordReading } from "@/lib/shelfStore";
+import { scopedKey } from "@/lib/userStorage";
 import type { BlockType, BookContentBlock, BookTocItem } from "@/types/database";
 
 // ─── Theme ───────────────────────────────────────────────────────────────────
@@ -196,6 +200,28 @@ interface PaginationConfig {
 }
 
 /**
+ * Matn nechta vizual qatorni egallashini taxminlaydi.
+ * MUHIM: matn ichidagi qator uzilishlari (\n) ham alohida qator sifatida
+ * hisoblanadi — aks holda ko'p paragrafli blok balandligi keskin
+ * kam baholanadi va matn sahifadan tashqariga chiqib ketadi (qirqiladi).
+ * So'z chegarasida o'ralishini hisobga olib biroz konservativ (0.92).
+ */
+function estimateTextLines(text: string, charsPerLine: number): number {
+  if (!text) return 1;
+  const cpl = Math.max(8, charsPerLine * 0.92);
+  let lines = 0;
+  for (const seg of text.split("\n")) {
+    const s = seg.trim();
+    if (!s) {
+      lines += 1; // paragraflar orasidagi bo'sh qator
+      continue;
+    }
+    lines += Math.max(1, Math.ceil(s.length / cpl));
+  }
+  return Math.max(1, lines);
+}
+
+/**
  * Bir blokni pikselda balandligini taxminlaydi.
  * Har bir blok turi o'zining ichki padding/margin'lariga ega.
  */
@@ -206,14 +232,14 @@ function estimateBlockHeight(block: BookContentBlock, cfg: PaginationConfig): nu
       const title = block.title ?? block.content ?? "";
       // Bob sarlavhasi: fontSize*1.38, lineHeight*1.35, paddingTop:36, paddingBottom:8, 2x gap:10, 2x line:1, paddingVertical:8*2
       const chCpl = Math.max(12, Math.floor(charsPerLine / 1.38));
-      const lines = Math.max(1, Math.ceil(title.length / chCpl));
+      const lines = estimateTextLines(title, chCpl);
       return 36 + 8 + 20 + 2 + 16 + lines * lineH * 1.38 * 1.35;
     }
     case "topic": {
       const title = block.title ?? block.content ?? "";
       // Mavzu sarlavhasi: fontSize*1.12, lineHeight*1.45, paddingTop:22, paddingBottom:4
       const tCpl = Math.max(15, Math.floor(charsPerLine / 1.12));
-      const lines = Math.max(1, Math.ceil(title.length / tCpl));
+      const lines = estimateTextLines(title, tCpl);
       return 22 + 4 + Math.max(lines * lineH * 1.12 * 1.45, 20);
     }
     case "image":
@@ -222,13 +248,13 @@ function estimateBlockHeight(block: BookContentBlock, cfg: PaginationConfig): nu
     case "quote":
     case "note": {
       const text = block.content ?? "";
-      const lines = Math.max(1, Math.ceil(text.length / charsPerLine));
+      const lines = estimateTextLines(text, charsPerLine);
       // marginVertical:10*2=20, paddingVertical:14*2=28
       return 20 + 28 + lines * lineH;
     }
     default: { // paragraph
       const text = block.content ?? "";
-      const lines = Math.max(1, Math.ceil(text.length / charsPerLine));
+      const lines = estimateTextLines(text, charsPerLine);
       // paddingVertical:5*2=10
       return lines * lineH + 10;
     }
@@ -248,13 +274,17 @@ function splitParagraph(
   if (!text) return null;
   const availLines = Math.floor((remainingH - 10) / cfg.lineH);
   if (availLines < 2) return null;
-  const maxChars = availLines * cfg.charsPerLine;
-  if (text.length <= maxChars) return null;
+  // Matn shu joyga to'liq sig'sa — bo'lish shart emas (qator uzilishlarini ham hisoblaymiz)
+  if (estimateTextLines(text, cfg.charsPerLine) <= availLines) return null;
 
-  let cut = maxChars;
-  const minCut = Math.floor(maxChars * 0.72);
+  // So'z o'ralishini hisobga olib konservativ belgilar soni
+  const maxChars = Math.max(cfg.charsPerLine, Math.floor(availLines * cfg.charsPerLine * 0.9));
+
+  let cut = Math.min(maxChars, text.length - 1);
+  const minCut = Math.floor(maxChars * 0.6);
+  // So'z yoki qator chegarasida kesamiz — birorta so'z bo'linib qolmasin
   while (cut > minCut && text[cut] !== " " && text[cut] !== "\n") cut--;
-  if (cut <= minCut) cut = maxChars;
+  if (cut <= minCut) cut = Math.min(maxChars, text.length - 1);
 
   const fitText = text.slice(0, cut).trimEnd();
   const restText = text.slice(cut).trimStart();
@@ -308,10 +338,14 @@ function groupBlocksIntoPages(
     const bH = estimateBlockHeight(block, cfg);
     const remaining = cfg.availableH - usedH;
 
-    if (current.length > 0 && bH > remaining) {
-      // Paragrafni bo'lish mumkinmi?
-      if (block.block_type === "paragraph" || !block.block_type) {
-        const split = splitParagraph(block, remaining, cfg);
+    if (bH > remaining) {
+      const isPara = block.block_type === "paragraph" || !block.block_type;
+      // Paragrafni — joriy sahifaga (yoki bo'sh sahifa bo'lsa to'liq sahifaga) —
+      // sig'adigan qismga bo'lamiz. Bu uzun paragraf bir betga ham sig'masa,
+      // uni bir necha betga cho'zib, BIRORTA so'z yo'qolmasligini kafolatlaydi.
+      if (isPara) {
+        const room = current.length > 0 ? remaining : cfg.availableH;
+        const split = splitParagraph(block, room, cfg);
         if (split) {
           current.push(split.head);
           flush();
@@ -319,10 +353,13 @@ function groupBlocksIntoPages(
           continue;
         }
       }
-      // Bo'lish mumkin emas — keyingi sahifaga o'tkazamiz
-      flush();
-      queue.unshift(block);
-      continue;
+      // Bo'lib bo'lmadi: sahifada allaqachon kontent bo'lsa — keyingi sahifaga o'tkazamiz
+      if (current.length > 0) {
+        flush();
+        queue.unshift(block);
+        continue;
+      }
+      // Aks holda (bo'sh sahifa + bo'linmaydigan blok, masalan rasm) — shu sahifaga joylashtiramiz
     }
 
     current.push(block);
@@ -333,6 +370,38 @@ function groupBlocksIntoPages(
 
   flush();
   return pages;
+}
+
+/**
+ * Admin paneldan kelgan "paragraph" bloklari ko'pincha butun bir bobning
+ * matnini (paragraflar orasidagi bo'sh qatorlar bilan birga) BITTA blokda
+ * saqlaydi. Bunday yirik bloklarni bo'sh qatorlar bo'yicha alohida paragraf
+ * bloklariga ajratamiz — shunda sahifalash aniqroq bo'ladi va matn betlarga
+ * tekis taqsimlanadi.
+ */
+function normalizeParagraphBlocks(input: BookContentBlock[]): BookContentBlock[] {
+  const out: BookContentBlock[] = [];
+  for (const b of input) {
+    const isPara = b.block_type === "paragraph" || !b.block_type;
+    if (isPara && b.content && /\n[ \t]*\n/.test(b.content)) {
+      const parts = b.content
+        .split(/\n[ \t]*\n+/)
+        .map((p) => p.trim())
+        .filter(Boolean);
+      parts.forEach((part, i) => {
+        out.push({
+          ...b,
+          id: i === 0 ? b.id : `${b.id}_p${i}`,
+          content: part,
+          // Faqat birinchi qismda anchor saqlanadi (TOC/qidiruv mosligi uchun)
+          anchor_id: i === 0 ? b.anchor_id : null,
+        });
+      });
+    } else {
+      out.push(b);
+    }
+  }
+  return out;
 }
 
 // ─── Block renderers ──────────────────────────────────────────────────────────
@@ -921,6 +990,7 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
   const insets = useSafeAreaInsets();
   const { fontScale, setFontScale } = useApp();
   const { book, blocks: rawBlocks, tocItems, loading, error, debugInfo } = useBookContent(bookId);
+  const access = useContentAccess("book", bookId);
 
   const [readerTheme, setReaderTheme] = useState<ReaderTheme>("white");
   const [fontFamily, setFontFamily] = useState<FontFamily>("serif");
@@ -945,12 +1015,40 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
   const theme = THEMES[readerTheme];
   const fontSize = 16 * fontScale;
 
-  // Determine effective blocks (DB blocks → cleaned_content fallback → empty)
+  // Determine effective blocks (DB blocks → cleaned_content fallback → empty).
+  // Yirik ko'p-paragrafli bloklarni ham normalizatsiya qilamiz.
   const blocks = useMemo<BookContentBlock[]>(() => {
-    if (rawBlocks.length > 0) return rawBlocks;
-    if (book?.cleanedContent) return parseCleanedContent(book.cleanedContent);
-    return [];
+    const source =
+      rawBlocks.length > 0
+        ? rawBlocks
+        : book?.cleanedContent
+        ? parseCleanedContent(book.cleanedContent)
+        : [];
+    return normalizeParagraphBlocks(source);
   }, [rawBlocks, book?.cleanedContent]);
+
+  // Paid-content gating: a paid book the user doesn't own shows only a ~1/4
+  // preview ("parcha") then a paywall. Free/owned books read in full.
+  const accessResolving = !!book && !book.isFree && access.isLoading;
+  const isPaidLocked = !!book && !book.isFree && !accessResolving && !access.hasAccess;
+  const previewBlocks = useMemo<BookContentBlock[]>(() => {
+    if (!isPaidLocked) return blocks;
+    const count = Math.max(6, Math.ceil(blocks.length * 0.25));
+    return blocks.slice(0, count);
+  }, [isPaidLocked, blocks]);
+
+  // Record this book on the "O'qilayotganlar" shelf once it's fully readable.
+  useEffect(() => {
+    if (book && !isPaidLocked && !accessResolving) {
+      recordReading({
+        contentType: "book",
+        contentId: bookId,
+        title: book.title,
+        cover: book.cover || null,
+        author: book.authorName || null,
+      });
+    }
+  }, [book, isPaidLocked, accessResolving, bookId]);
 
   // ── Sahifa maydoni chegaralari (top/bottom barlar DOIM shu joyda)
   // Top bar: insets.top + 8 paddingTop + 38 ikon + 10 paddingBottom = insets.top + 56
@@ -961,20 +1059,21 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
 
   const paginationConfig = useMemo<PaginationConfig>(() => {
     const lineH = fontSize * 1.55;
-    const availableH = Math.max(200, SCREEN_H - PAGE_TOP - PAGE_BOT - 28); // 28 = sahifa raqami
-    const charW = fontSize * 0.50; // O'zbek matni uchun taxminiy belgi kengligi
+    // 28 = sahifa raqami; bir qator xavfsizlik chegarasi — matn top/bottom
+    // barlar zonasiga (chiqib-kiradigan joyga) hech qachon tushmasligi uchun.
+    const availableH = Math.max(200, SCREEN_H - PAGE_TOP - PAGE_BOT - 28 - lineH);
+    const charW = fontSize * 0.52; // O'zbek matni uchun taxminiy belgi kengligi (konservativ)
     const contentW = SCREEN_W - 40; // paddingHorizontal:20 har tomonda
     const charsPerLine = Math.max(18, Math.floor(contentW / charW));
     return { availableH, lineH, charsPerLine };
   }, [fontSize, PAGE_TOP, PAGE_BOT]);
 
-  // Bloklarni sahifalarga guruhlash + muqova sahifasi (agar cover mavjud bo'lsa)
-  const pages = useMemo<ReaderPage[]>(() => {
-    const content = groupBlocksIntoPages(blocks, paginationConfig);
-    if (!book?.cover) return content;
-    const cover: ReaderPage = { id: "cover", blocks: [], pageIndex: 0, isCover: true };
-    return [cover, ...content.map((p, i) => ({ ...p, pageIndex: i + 1 }))];
-  }, [blocks, book?.cover, paginationConfig]);
+  // Bloklarni sahifalarga guruhlash. Muqova birinchi sahifaga MAJBURAN
+  // qo'yilmaydi — kitob to'g'ridan-to'g'ri matndan boshlanadi.
+  const pages = useMemo<ReaderPage[]>(
+    () => groupBlocksIntoPages(blocks, paginationConfig),
+    [blocks, paginationConfig]
+  );
 
   // anchor_id → blok indeksi (uzluksiz scroll rejimi uchun)
   const anchorIndexMap = useMemo<Record<string, number>>(() => {
@@ -1024,7 +1123,7 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
   // Oxirgi o'qilgan kitobni saqlash (bosh sahifadagi "davom etish" kartasi uchun)
   useEffect(() => {
     if (bookId) {
-      AsyncStorage.setItem("adabiyot.last_book_id", bookId).catch(() => {});
+      AsyncStorage.setItem(scopedKey("last_book_id"), bookId).catch(() => {});
     }
   }, [bookId]);
 
@@ -1067,21 +1166,6 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
     setUiVisible(next);
     Animated.timing(uiAnim, { toValue: next ? 1 : 0, duration: 220, useNativeDriver: true }).start();
   }, [uiAnim]);
-
-  // Muqova sahifasida barlar avtomatik yashiriladi, boshqa sahifada qaytadi
-  useEffect(() => {
-    const onCover = pages[0]?.isCover && currentPageIndex === 0;
-    const shouldHide = onCover;
-    if (shouldHide && uiVisibleRef.current) {
-      uiVisibleRef.current = false;
-      setUiVisible(false);
-      Animated.timing(uiAnim, { toValue: 0, duration: 300, useNativeDriver: true }).start();
-    } else if (!shouldHide && !uiVisibleRef.current) {
-      uiVisibleRef.current = true;
-      setUiVisible(true);
-      Animated.timing(uiAnim, { toValue: 1, duration: 220, useNativeDriver: true }).start();
-    }
-  }, [currentPageIndex, pages, uiAnim]);
 
   const scrollToPage = useCallback(
     (pageIndex: number, animated = true) => {
@@ -1159,24 +1243,6 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
 
   const renderItem = useCallback(
     ({ item: page }: { item: ReaderPage }) => {
-      // Muqova sahifasi — flex:1 (FlatList har doim to'liq balandlikda, zoom yo'q)
-      if (page.isCover) {
-        return (
-          <Pressable
-            style={{ width: SCREEN_W, flex: 1, backgroundColor: theme.bg }}
-            onPress={toggleUI}
-          >
-            {/* Muqova to'liq, qirqilmay, toza fonda */}
-            <Image
-              source={{ uri: book!.cover }}
-              style={{ width: "100%", flex: 1 }}
-              contentFit="contain"
-              transition={400}
-            />
-          </Pressable>
-        );
-      }
-
       // Bob boshlanayotgan sahifada birinchi paragraph indeksini topamiz (drop cap uchun)
       const startsWithChapter = page.blocks[0]?.block_type === "chapter";
       const firstParaIdx = startsWithChapter
@@ -1321,6 +1387,68 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
             </View>
           )}
         </View>
+      </View>
+    );
+  }
+
+  // ── Resolving paid access ──
+  if (accessResolving) {
+    return (
+      <View style={[rStyles.centered, { backgroundColor: theme.bg }]}>
+        <ActivityIndicator color={theme.accent} size="large" />
+      </View>
+    );
+  }
+
+  // ── Paid + not owned → 1/4 preview ("parcha") + paywall ──
+  if (isPaidLocked) {
+    return (
+      <View style={[rStyles.fill, { backgroundColor: theme.paper }]}>
+        <View style={[rStyles.topBar, { paddingTop: insets.top + 8, backgroundColor: theme.bg }]}>
+          <Pressable onPress={() => router.back()} style={rStyles.iconBtn}>
+            <ArrowLeft color={theme.text} size={20} />
+          </Pressable>
+          <Text style={[rStyles.headerTitle, { color: theme.text }]} numberOfLines={1}>
+            {book.title}
+          </Text>
+          <View style={{ width: 40 }} />
+        </View>
+        <ScrollView
+          contentContainerStyle={{ paddingTop: insets.top + 64, paddingHorizontal: 20, paddingBottom: insets.bottom + 40 }}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={[pwStyles.badge, { backgroundColor: theme.quoteBg }]}>
+            <Text style={[pwStyles.badgeText, { color: theme.accent }]}>PARCHA · BEPUL O'QISH</Text>
+          </View>
+          {previewBlocks.map((block) => (
+            <View key={block.id}>
+              {renderBlock(block, fontSize, fontFamily, theme, false)}
+            </View>
+          ))}
+          <LinearGradient
+            colors={[theme.paper + "00", theme.paper]}
+            style={pwStyles.fade}
+            pointerEvents="none"
+          />
+          <View style={[pwStyles.card, { backgroundColor: theme.paper, borderColor: theme.chapterLine }]}>
+            <View style={[pwStyles.lockCircle, { backgroundColor: theme.quoteBg }]}>
+              <Lock color={theme.accent} size={22} />
+            </View>
+            <Text style={[pwStyles.title, { color: theme.text }]}>
+              Bu asarning davomini o'qish uchun xarid qiling.
+            </Text>
+            <Pressable
+              onPress={() => router.replace(`/book/${bookId}`)}
+              style={[pwStyles.buyBtn, { backgroundColor: theme.accent }]}
+            >
+              <ShoppingBag color="#fff" size={17} />
+              <Text style={pwStyles.buyBtnText}>To'liq o'qish uchun sotib olish</Text>
+            </Pressable>
+            <Pressable onPress={() => router.push("/payments/tariflar")} hitSlop={8} style={{ marginTop: 14 }}>
+              <Text style={[pwStyles.tariffText, { color: theme.accent }]}>Tarif orqali ochish</Text>
+            </Pressable>
+          </View>
+        </ScrollView>
       </View>
     );
   }
@@ -1507,6 +1635,53 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
+const pwStyles = StyleSheet.create({
+  badge: {
+    alignSelf: "flex-start",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    marginTop: 6,
+    marginBottom: 6,
+  },
+  badgeText: { fontSize: 10, fontWeight: "900", letterSpacing: 1.1 },
+  fade: { height: 70, marginTop: -70 },
+  card: {
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 22,
+    alignItems: "center",
+    marginTop: 4,
+  },
+  lockCircle: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  title: {
+    fontFamily: FONT.serif,
+    fontSize: 19,
+    lineHeight: 26,
+    fontWeight: "800",
+    textAlign: "center",
+    marginTop: 16,
+  },
+  buyBtn: {
+    height: 50,
+    borderRadius: 14,
+    paddingHorizontal: 22,
+    marginTop: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  buyBtnText: { color: "#fff", fontSize: 14, fontWeight: "800" },
+  tariffText: { fontSize: 14, fontWeight: "700", textAlign: "center" },
+});
+
 const bStyles = StyleSheet.create({
   chapterWrap: {
     paddingHorizontal: 20,
@@ -1664,6 +1839,8 @@ const pgStyles = StyleSheet.create({
   },
   content: {
     flex: 1,
+    // Matn xavfsiz zonada qoladi — top/bottom barlar joyiga hech qachon chiqmaydi
+    overflow: "hidden",
   },
   pageNum: {
     fontSize: 12,

@@ -51,20 +51,6 @@ export interface Book {
   trending?: boolean;
 }
 
-export interface Reel {
-  id: string;
-  title: string;
-  authorId: string;
-  publisherId: string;
-  description: string;
-  fullDescription: string;
-  poster: string;
-  video: string;
-  likes: number;
-  comments: number;
-  relatedBookId?: string;
-}
-
 export type ArticleBlock =
   | { id: string; type: "title"; text: string; level?: 2 | 3 }
   | { id: string; type: "paragraph"; text: string }
@@ -288,7 +274,7 @@ export const publishers: Publisher[] = [
   },
   {
     id: "p4",
-    name: "Adabiyot AI Studio",
+    name: "AdabiyotX Studio",
     logo: "https://images.unsplash.com/photo-1485846234645-a62644f84728?w=200",
     about: "Adabiyot, audio va ekran asarlarini birlashtiruvchi ijodiy studiya.",
   },
@@ -751,7 +737,7 @@ export const articles: Article[] = [
         type: "quote",
         text:
           "Tarixiy nizoni tushunish uchun taraflarning faqat bugungi talablarini emas, ular o'zini qaysi xotira orqali anglashini ham ko'rish kerak.",
-        author: "Adabiyot AI tahririyati",
+        author: "AdabiyotX tahririyati",
       },
       {
         id: "ma1-b9",
@@ -1139,69 +1125,6 @@ export const articles: Article[] = [
   },
 ];
 
-export const reels: Reel[] = [
-  {
-    id: "r1",
-    title: "Shaharda Yolg'iz",
-    authorId: "a2",
-    publisherId: "p2",
-    description: "She'riy ijro — Toshkent tunlariga bag'ishlangan.",
-    fullDescription:
-      "Sardor Rashidovning \"Shaharda Yolg'iz\" to'plamidan. Shaharning tungi ovozi bilan o'qilgan she'r. Musiqa va tasvir bilan mujassam.",
-    poster: "https://images.unsplash.com/photo-1519608487953-e999c86e7455?w=800",
-    video:
-      "https://videos.pexels.com/video-files/3209828/3209828-uhd_2560_1440_25fps.mp4",
-    likes: 12400,
-    comments: 340,
-    relatedBookId: "b2",
-  },
-  {
-    id: "r2",
-    title: "Yurak Tilida",
-    authorId: "a5",
-    publisherId: "p1",
-    description: "Dilnoza Abdullayeva she'rini o'qiydi.",
-    fullDescription:
-      "She'r yurakdan keladi. Dilnoza Abdullayevaning yangi to'plamidan birinchi ijro.",
-    poster: "https://images.unsplash.com/photo-1499728603263-13726abce5fd?w=800",
-    video:
-      "https://videos.pexels.com/video-files/5752729/5752729-hd_1080_1920_30fps.mp4",
-    likes: 28900,
-    comments: 890,
-    relatedBookId: "b8",
-  },
-  {
-    id: "r3",
-    title: "Qora Daryo — treyler",
-    authorId: "a4",
-    publisherId: "p3",
-    description: "Yangi qissa uchun kino uslubidagi treyler.",
-    fullDescription:
-      "\"Qora Daryo\" qissasi asosida tayyorlangan kitob treyleri. Sharq Nashriyoti taqdimoti.",
-    poster: "https://images.unsplash.com/photo-1493770348161-369560ae357d?w=800",
-    video:
-      "https://videos.pexels.com/video-files/2022395/2022395-hd_1080_1920_30fps.mp4",
-    likes: 8700,
-    comments: 210,
-    relatedBookId: "b5",
-  },
-  {
-    id: "r4",
-    title: "Yomg'ir Ostida",
-    authorId: "a2",
-    publisherId: "p2",
-    description: "Yomg'irli kechada yozilgan she'r.",
-    fullDescription:
-      "\"Yomg'ir Ostida\" to'plamidan. Tomchilar va so'zlar. Musiqa — original kompozitsiya.",
-    poster: "https://images.unsplash.com/photo-1468081410950-b7a5deaad11a?w=800",
-    video:
-      "https://videos.pexels.com/video-files/4625747/4625747-hd_1080_1920_30fps.mp4",
-    likes: 15600,
-    comments: 420,
-    relatedBookId: "b6",
-  },
-];
-
 export const categories: { name: Category; icon: string; color: string }[] = [
   { name: "Hikoya", icon: "BookOpen", color: "#2E7D32" },
   { name: "Roman", icon: "Book", color: "#388E3C" },
@@ -1221,9 +1144,6 @@ export function getPublisher(id: string): Publisher | undefined {
 }
 export function getBook(id: string): Book | undefined {
   return books.find((b) => b.id === id);
-}
-export function getReel(id: string): Reel | undefined {
-  return reels.find((r) => r.id === id);
 }
 export function getScreenplay(id: string): Screenplay | undefined {
   return screenplays.find((s) => s.id === id);

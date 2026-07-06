@@ -75,7 +75,12 @@ function handleBannerPress(banner: MobileHomeBanner) {
       case "article":    if (rid) router.push(`/article/${rid}`); break;
       case "poem":       if (rid) router.push(`/poem/${rid}`); break;
       case "screenplay": if (rid) router.push(`/screenplay/${rid}`); break;
-      case "reel":       if (rid) router.push(`/reel/${rid}`); break;
+      case "reel":
+        router.push({
+          pathname: "/(tabs)/reels",
+          params: rid ? { reelId: rid } : undefined,
+        });
+        break;
       case "author":     if (rid) router.push(`/author/${rid}`); break;
       case "publisher":  if (rid) router.push(`/publisher/${rid}`); break;
       default: break;
@@ -279,7 +284,7 @@ export default function HeroBannerCarousel() {
     );
     glowAnimRef.current.start();
     return () => { glowAnimRef.current?.stop(); };
-  }, [isWide]); // only re-run when layout mode changes
+  }, [glowOpacity, isWide]); // only re-run when layout mode changes
 
   // ── goToIndex — STABLE (no deps, uses refs) ───────────────────────────────
   const goToIndex = useCallback((idx: number, animated = true) => {

@@ -1,11 +1,13 @@
 import { LinearGradient } from "expo-linear-gradient";
 import { Image } from "expo-image";
 import { router, useLocalSearchParams } from "expo-router";
-import { Bookmark, ChevronLeft, Eye, Play } from "lucide-react-native";
+import { ChevronLeft, Eye, Info, Lock, Play, ShoppingBag, Sparkles } from "lucide-react-native";
 import React, { useEffect, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
   Dimensions,
   LayoutAnimation,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -15,18 +17,37 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import type { AppTheme } from "@/constants/colors";
 import { FONT, PressableScale, Screen } from "@/components/ui";
-import { palette } from "@/constants/colors";
+import RatingReviewBlock from "@/components/RatingReviewBlock";
+import ContentHeaderActions from "@/components/ContentHeaderActions";
+import { recordReading } from "@/lib/shelfStore";
 import {
   books,
   getAuthor,
   getBook,
   getPublisher,
-  reels,
   type Author,
   type Book,
 } from "@/mocks/content";
+import { usePublishedBook } from "@/hooks/usePublishedBooks";
+import { usePublicReels } from "@/hooks/useReels";
 import { useApp } from "@/providers/AppProvider";
+import { useAuth } from "@/providers/AuthProvider";
+import BuyConfirmSheet from "@/components/payments/BuyConfirmSheet";
+import CardPaymentSheet from "@/components/payments/CardPaymentSheet";
+import PromoPriceBlock from "@/components/payments/PromoPriceBlock";
+import {
+  createOrderInputFromPaymentProduct,
+  logCreateOrderDebug,
+  showMissingPaymentProductAlert,
+  useContentAccess,
+  usePaymentProduct,
+  usePurchaseFlow,
+} from "@/hooks/usePayments";
+import { usePromo } from "@/hooks/usePromo";
+import { useTheme } from "@/providers/ThemeProvider";
+import type { PublicReel } from "@/lib/reels";
 
 const { width: SCREEN_W } = Dimensions.get("window");
 const AUDIO_CARD_W = Math.round(SCREEN_W * 0.82);
@@ -249,29 +270,6 @@ function getPoemPreset(book: Book, author?: Author): PoemPreset {
   );
 }
 
-function collectPoemReels(book: Book) {
-  const seen = new Set<string>();
-  const relatedPoemReels = reels.filter((reel) => {
-    const relatedBook = reel.relatedBookId ? getBook(reel.relatedBookId) : undefined;
-    return (
-      reel.relatedBookId === book.id ||
-      (relatedBook?.category === "She'r" && relatedBook.authorId === book.authorId)
-    );
-  });
-  const fallbackPoemReels = reels.filter((reel) => {
-    const relatedBook = reel.relatedBookId ? getBook(reel.relatedBookId) : undefined;
-    return relatedBook?.category === "She'r";
-  });
-
-  return [...relatedPoemReels, ...fallbackPoemReels]
-    .filter((reel) => {
-      if (seen.has(reel.id)) return false;
-      seen.add(reel.id);
-      return true;
-    })
-    .slice(0, 4);
-}
-
 function formatCompactMetric(value: number): string {
   if (value >= 1_000_000) {
     return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M`;
@@ -292,24 +290,12 @@ function formatDuration(seconds: number): string {
   return `${mins}:${secs}`;
 }
 
-function buildPerformanceCards(book: Book): CompactAudioItem[] {
-  return collectPoemReels(book).map((reel, index) => ({
+function buildVideoCards(source: PublicReel[]) {
+  return source.slice(0, 4).map((reel) => ({
     id: reel.id,
     title: reel.title,
-    subtitle: getAuthor(reel.authorId)?.name ?? "Ijrochi",
-    thumbnail: getAuthor(reel.authorId)?.photo ?? reel.poster,
-    durationSeconds: 120 + index * 17 + (reel.comments % 35),
-    views: reel.likes * 12 + reel.comments * 8,
-    reelId: reel.id,
-  }));
-}
-
-function buildVideoCards(book: Book) {
-  return collectPoemReels(book).map((reel) => ({
-    id: reel.id,
-    title: reel.title,
-    performer: getAuthor(reel.authorId)?.name ?? "Ijrochi",
-    thumbnail: reel.poster,
+    performer: reel.creatorName ?? "Ijodkor",
+    thumbnail: reel.thumbnailUrl,
   }));
 }
 
@@ -317,14 +303,18 @@ function formatLicenseFee(value: number): string {
   return value === 0 ? "bepul" : `${value.toLocaleString()} so'm`;
 }
 
+type StylesType = ReturnType<typeof createStyles>;
+
 function SectionHeader({
   title,
   action,
   onAction,
+  styles,
 }: {
   title: string;
   action?: string;
   onAction?: () => void;
+  styles: StylesType;
 }) {
   return (
     <View style={styles.sectionHeader}>
@@ -345,9 +335,13 @@ function SectionHeader({
 function CompactAudioCard({
   item,
   onPress,
+  palette,
+  styles,
 }: {
   item: CompactAudioItem;
   onPress?: () => void;
+  palette: AppTheme;
+  styles: StylesType;
 }) {
   return (
     <PressableScale onPress={onPress} style={styles.audioCard}>
@@ -376,13 +370,19 @@ function CompactAudioCard({
 function VideoPreviewCard({
   item,
   onPress,
+  styles,
 }: {
-  item: { id: string; title: string; performer: string; thumbnail: string };
+  item: { id: string; title: string; performer: string; thumbnail: string | null };
   onPress?: () => void;
+  styles: StylesType;
 }) {
   return (
     <PressableScale onPress={onPress} style={styles.videoCard}>
-      <Image source={{ uri: item.thumbnail }} style={styles.videoThumb} contentFit="cover" />
+      {item.thumbnail ? (
+        <Image source={{ uri: item.thumbnail }} style={styles.videoThumb} contentFit="cover" />
+      ) : (
+        <View style={styles.videoThumb} />
+      )}
       <LinearGradient
         colors={["transparent", "rgba(17,17,17,0.12)", "rgba(17,17,17,0.84)"]}
         locations={[0, 0.45, 1]}
@@ -403,18 +403,120 @@ function VideoPreviewCard({
   );
 }
 
+type PoemView = {
+  id: string;
+  title: string;
+  authorName: string;
+  publisherName?: string;
+  moodLine: string;
+  stanzas: string[];
+  publishedAt: string;
+  licenseFee: number;
+  free: boolean;
+  audioAvailable: boolean;
+  performances: CompactAudioItem[];
+  songs: SongCardItem[];
+  videos: { id: string; title: string; performer: string; thumbnail: string | null }[];
+};
+
+function splitPoemStanzas(content: string | null): string[] {
+  if (!content) return [];
+  const normalized = content.replace(/\r\n/g, "\n").trim();
+  if (!normalized) return [];
+  const byBlankLine = normalized
+    .split(/\n[ \t]*\n+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return byBlankLine.length > 0 ? byBlankLine : [normalized];
+}
+
+function formatPoemDate(iso: string | null): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString("uz-UZ", { day: "numeric", month: "long", year: "numeric" });
+}
+
 export default function PoemScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
-  const book = useMemo(() => getBook(String(id)), [id]);
-  const author = useMemo(() => (book ? getAuthor(book.authorId) : undefined), [book]);
-  const publisher = useMemo(() => (book ? getPublisher(book.publisherId) : undefined), [book]);
-  const { savedBookIds, purchasedBookIds, toggleSaveBook, buyBook, addHistory } = useApp();
+  const { colors: palette, isDark } = useTheme();
+  const styles = useMemo(() => createStyles(palette), [palette]);
+  const mockBook = useMemo(() => getBook(String(id)), [id]);
+  const { book: supaBook, loading: supaLoading } = usePublishedBook(
+    mockBook ? "" : String(id ?? "")
+  );
+  const author = useMemo(() => (mockBook ? getAuthor(mockBook.authorId) : undefined), [mockBook]);
+  const publisher = useMemo(
+    () => (mockBook ? getPublisher(mockBook.publisherId) : undefined),
+    [mockBook]
+  );
+  const { savedBookIds, toggleSaveBook, addHistory } = useApp();
+  const { isAuthenticated, userId, refreshProfileRow } = useAuth();
+  const { reels: publicReels } = usePublicReels(userId);
   const [poemFontScale, setPoemFontScale] = useState(1);
+  const [infoOpen, setInfoOpen] = useState(false);
 
-  const poemPreset = useMemo(() => (book ? getPoemPreset(book, author) : null), [book, author]);
-  const performances = useMemo(() => (book ? buildPerformanceCards(book) : []), [book]);
-  const videos = useMemo(() => (book ? buildVideoCards(book) : []), [book]);
+  const poemPreset = useMemo(
+    () => (mockBook ? getPoemPreset(mockBook, author) : null),
+    [mockBook, author]
+  );
+  const realVideos = useMemo(() => buildVideoCards(publicReels), [publicReels]);
+
+  const isSupaPoem =
+    !mockBook && !!supaBook && (supaBook.genre === "She'r" || supaBook.contentMode === "poem");
+
+  const vm = useMemo<PoemView | null>(() => {
+    if (mockBook && poemPreset) {
+      return {
+        id: mockBook.id,
+        title: mockBook.title,
+        authorName: author?.name ?? "",
+        publisherName: publisher?.name,
+        moodLine: poemPreset.moodLine,
+        stanzas: poemPreset.stanzas,
+        publishedAt: poemPreset.publishedAt,
+        licenseFee: poemPreset.licenseFee,
+        free: mockBook.free,
+        audioAvailable: mockBook.audioAvailable,
+        performances: [],
+        songs: poemPreset.songs,
+        videos: realVideos,
+      };
+    }
+    if (isSupaPoem && supaBook) {
+      const stanzas = splitPoemStanzas(supaBook.cleanedContent);
+      return {
+        id: supaBook.id,
+        title: supaBook.title,
+        authorName: supaBook.authorName,
+        publisherName: supaBook.publisherName || undefined,
+        moodLine:
+          supaBook.description ||
+          "So'zlar sahifada emas, kayfiyatda davom etadigan she'riy tajriba.",
+        stanzas: stanzas.length > 0 ? stanzas : ["She'r matni hali yuklanmagan."],
+        publishedAt: formatPoemDate(supaBook.createdAt),
+        licenseFee: supaBook.isFree ? 0 : supaBook.price,
+        free: supaBook.isFree,
+        audioAvailable: !!supaBook.audioUrl,
+        performances: [],
+        songs: [],
+        videos: realVideos,
+      };
+    }
+    return null;
+  }, [mockBook, poemPreset, author, publisher, realVideos, isSupaPoem, supaBook]);
+
+  const access = useContentAccess("poem", vm?.id);
+  const purchaseFlow = usePurchaseFlow();
+  const paymentProductQuery = usePaymentProduct("poem", vm?.id);
+  const paymentProduct = paymentProductQuery.data ?? null;
+  const promo = usePromo({
+    contentType: paymentProduct?.content_type ?? "poem",
+    contentId: paymentProduct?.content_id ?? vm?.id,
+    productId: paymentProduct?.id,
+  });
+  const [showBuy, setShowBuy] = useState(false);
 
   const canZoomOut = poemFontScale > 0.88;
   const canZoomIn = poemFontScale < 1.28;
@@ -431,18 +533,47 @@ export default function PoemScreen() {
   }, []);
 
   useEffect(() => {
-    if (book && book.category !== "She'r") {
-      router.replace(`/reader/${book.id}`);
+    if (mockBook && mockBook.category !== "She'r") {
+      router.replace(`/reader/${mockBook.id}`);
     }
-  }, [book]);
+  }, [mockBook]);
 
   useEffect(() => {
-    if (book) {
-      addHistory(book.id);
+    if (!mockBook && supaBook && supaBook.genre !== "She'r" && supaBook.contentMode !== "poem") {
+      router.replace(`/book/${supaBook.id}`);
     }
-  }, [book, addHistory]);
+  }, [mockBook, supaBook]);
 
-  if (!book) {
+  useEffect(() => {
+    if (vm) {
+      addHistory(vm.id);
+    }
+  }, [vm, addHistory]);
+
+  // Record on the "O'qilayotganlar" shelf once the full poem is readable.
+  useEffect(() => {
+    if (vm && (vm.free || access.hasAccess)) {
+      recordReading({
+        contentType: "poem",
+        contentId: vm.id,
+        title: vm.title,
+        cover: mockBook?.cover ?? supaBook?.cover ?? null,
+        author: vm.authorName || null,
+      });
+    }
+  }, [vm, access.hasAccess, mockBook?.cover, supaBook?.cover]);
+
+  if (!mockBook && supaLoading) {
+    return (
+      <Screen>
+        <View style={styles.missingWrap}>
+          <ActivityIndicator color={palette.primary} size="large" />
+        </View>
+      </Screen>
+    );
+  }
+
+  if (!vm) {
     return (
       <Screen>
         <View style={styles.missingWrap}>
@@ -452,17 +583,55 @@ export default function PoemScreen() {
     );
   }
 
-  if (book.category !== "She'r" || !poemPreset) {
-    return null;
-  }
+  const saved = savedBookIds.includes(vm.id);
+  const purchased = vm.free || access.hasAccess;
+  const poemPrice = vm.free ? 0 : paymentProduct?.amount_uzs ?? vm.licenseFee;
+  // Paid she'r the user doesn't own → show only ~1/4 of the stanzas as a parcha.
+  const previewStanzas = purchased
+    ? vm.stanzas
+    : vm.stanzas.slice(0, Math.max(2, Math.ceil(vm.stanzas.length * 0.25)));
+  const stanzaLocked = !purchased && previewStanzas.length < vm.stanzas.length;
+  const openBuy = () => {
+    if (!isAuthenticated) {
+      router.push("/auth");
+      return;
+    }
+    if (paymentProductQuery.isLoading || paymentProductQuery.isFetching) return;
+    if (!paymentProduct) {
+      showMissingPaymentProductAlert();
+      return;
+    }
+    setShowBuy(true);
+  };
+  const confirmBuy = () => {
+    if (!paymentProduct) {
+      setShowBuy(false);
+      showMissingPaymentProductAlert();
+      return;
+    }
+    setShowBuy(false);
+    logCreateOrderDebug(paymentProduct);
+    void purchaseFlow.start(createOrderInputFromPaymentProduct(paymentProduct), { promoCode: promo.appliedCode });
+  };
 
-  const saved = savedBookIds.includes(book.id);
-  const purchased = purchasedBookIds.includes(book.id) || book.free;
+  const handleStartCreating = async () => {
+    await refreshProfileRow().catch(() => {});
+    router.push({
+      pathname: "/creator/submit",
+      params: {
+        linkedContentType: "poem",
+        linkedContentId: vm.id,
+        linkedContentTitle: vm.title,
+      },
+    });
+  };
 
   return (
     <Screen>
       <ScrollView
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets
         contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: insets.bottom + 48 }}
       >
         <View style={styles.topBar}>
@@ -482,26 +651,30 @@ export default function PoemScreen() {
             >
               <Text style={[styles.zoomBtnText, !canZoomIn && styles.zoomBtnTextDisabled]}>A+</Text>
             </PressableScale>
-            <Pressable onPress={() => toggleSaveBook(book.id)} style={styles.iconBtn}>
-              <Bookmark
-                color={saved ? palette.primary : palette.text}
-                fill={saved ? palette.primary : "transparent"}
-                size={18}
-              />
+            <Pressable onPress={() => setInfoOpen(true)} style={styles.iconBtn}>
+              <Info color={palette.text} size={18} />
             </Pressable>
+            <ContentHeaderActions
+              contentType="poem"
+              contentId={vm.id}
+              title={vm.title}
+              author={vm.authorName}
+              cover={mockBook?.cover ?? supaBook?.cover ?? null}
+              description={vm.moodLine}
+              c={palette}
+              isDark={isDark}
+            />
           </View>
         </View>
 
         <View style={styles.heroWrap}>
-          <Text style={styles.kicker}>She'r sahifasi</Text>
-          <Text style={styles.poemTitle}>{book.title}</Text>
-          <Text style={styles.poemAuthor}>{author?.name}</Text>
-          <Text style={styles.moodLine}>{poemPreset.moodLine}</Text>
+          {vm.authorName ? <Text style={styles.poemAuthor}>{vm.authorName}</Text> : null}
+          <Text style={styles.poemTitle}>{vm.title}</Text>
         </View>
 
         <View style={styles.poemPage}>
-          {poemPreset.stanzas.map((stanza, index) => (
-            <View key={`${book.id}-stanza-${index}`} style={styles.stanzaWrap}>
+          {previewStanzas.map((stanza, index) => (
+            <View key={`${vm.id}-stanza-${index}`} style={styles.stanzaWrap}>
               <Text
                 style={[
                   styles.stanzaText,
@@ -517,142 +690,235 @@ export default function PoemScreen() {
           ))}
         </View>
 
-        <View style={styles.metaCard}>
-          <Text style={styles.metaTitle}>Asar haqida</Text>
-          <View style={styles.metaRow}>
-            <Text style={styles.metaLabel}>Sana</Text>
-            <Text style={styles.metaValue}>{poemPreset.publishedAt}</Text>
-          </View>
-          <View style={styles.metaRow}>
-            <Text style={styles.metaLabel}>Muallif</Text>
-            <Text style={styles.metaValue}>{author?.name}</Text>
-          </View>
-          {publisher ? (
-            <View style={styles.metaRow}>
-              <Text style={styles.metaLabel}>Nashr</Text>
-              <Text style={styles.metaValue}>{publisher.name}</Text>
+        {stanzaLocked ? (
+          <View style={styles.poemPaywall}>
+            <View style={styles.poemPaywallIcon}>
+              <Lock color={palette.primary} size={20} />
             </View>
-          ) : null}
-          <View style={styles.certificatePill}>
-            <Text style={styles.certificateText}>Ushbu she'r mualliflik sertifikatiga ega</Text>
+            <Text style={styles.poemPaywallTitle}>
+              Bu asarning davomini o'qish uchun xarid qiling.
+            </Text>
+            <Text style={styles.poemPaywallText}>
+              Yuqorida she'rning parchasi ko'rsatildi. To'liq matn xariddan keyin ochiladi.
+            </Text>
+            <PressableScale onPress={openBuy} style={styles.poemPaywallBtn}>
+              <ShoppingBag color="#fff" size={16} />
+              <Text style={styles.poemPaywallBtnText}>To'liq o'qish uchun sotib olish</Text>
+            </PressableScale>
           </View>
-        </View>
+        ) : null}
 
         <View style={styles.licenseCard}>
-          <Text style={styles.licenseLabel}>Ijro uchun</Text>
-          <Text style={styles.licenseValue}>{formatLicenseFee(poemPreset.licenseFee)}</Text>
-          <Text style={styles.licenseNote}>
-            Sahna, studiya va media ijrolari uchun litsenziya so'rovi shu joydan boshlanadi.
-          </Text>
-        </View>
-
-        <PressableScale onPress={() => buyBook(book.id)} style={styles.purchaseBtn}>
-          <Text style={styles.purchaseBtnText}>SHERNI HARID QILISH</Text>
-        </PressableScale>
-        {purchased ? <Text style={styles.purchaseState}>She'r sizning kutubxonangizda mavjud.</Text> : null}
-
-        <View style={styles.sectionWrap}>
-          <SectionHeader title="Monologlar" action="Barchasi" onAction={() => router.push("/reels")} />
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.audioRow}
-          >
-            {performances.map((item) => (
-              <CompactAudioCard
-                key={item.id}
-                item={item}
-                onPress={() =>
-                  router.push({
-                    pathname: "/poem-audio/[bookId]",
-                    params: {
-                      bookId: book.id,
-                      kind: "monologue",
-                      itemId: item.id,
-                      title: item.title,
-                      artist: item.subtitle,
-                      artwork: item.thumbnail,
-                      durationSeconds: String(item.durationSeconds),
-                      views: String(item.views),
-                      poemTitle: book.title,
-                    },
-                  })
-                }
+          <View style={styles.licenseRow}>
+            <Text style={styles.licenseLabel}>Ijro uchun</Text>
+            <Text style={styles.licenseValue}>{formatLicenseFee(poemPrice)}</Text>
+          </View>
+          {promo.isActive && !purchased && !vm.free ? (
+            <View style={{ marginTop: 14 }}>
+              <PromoPriceBlock
+                isActive={promo.isActive}
+                originalAmount={promo.pricing?.original_amount_uzs ?? poemPrice}
+                finalAmount={promo.pricing?.final_amount_uzs ?? poemPrice}
+                discountPercent={promo.pricing?.discount_percent ?? 0}
+                promoCode={promo.appliedCode ?? ""}
+                endsAt={promo.endsAt}
               />
-            ))}
-          </ScrollView>
+            </View>
+          ) : null}
+          <PressableScale onPress={handleStartCreating} style={styles.createBtn}>
+            <Sparkles color="#fff" size={16} />
+            <Text style={styles.createBtnText}>Ushbu she'r bilan ijodni boshlash</Text>
+          </PressableScale>
+          {purchased ? (
+            <Text style={styles.purchaseState}>She'r sizning kutubxonangizda mavjud.</Text>
+          ) : (
+            <PressableScale onPress={openBuy} style={styles.purchaseBtnOutline}>
+              <Text style={styles.purchaseBtnOutlineText}>She'rni xarid qilish</Text>
+            </PressableScale>
+          )}
         </View>
 
-        <View style={styles.partnerRow}>
-          <View style={styles.partnerDot} />
-          <Text style={styles.partnerText}>OhangLab ilovasi bilan hamkorlikda</Text>
-        </View>
+        {vm.performances.length > 0 ? (
+          <>
+            <View style={styles.sectionWrap}>
+              <SectionHeader title="Monologlar" action="Barchasi" onAction={() => router.push("/reels")} styles={styles} />
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.audioRow}
+              >
+                {vm.performances.map((item) => (
+                  <CompactAudioCard
+                    key={item.id}
+                    item={item}
+                    palette={palette}
+                    styles={styles}
+                    onPress={() =>
+                      router.push({
+                        pathname: "/poem-audio/[bookId]",
+                        params: {
+                          bookId: vm.id,
+                          kind: "monologue",
+                          itemId: item.id,
+                          title: item.title,
+                          artist: item.subtitle,
+                          artwork: item.thumbnail,
+                          durationSeconds: String(item.durationSeconds),
+                          views: String(item.views),
+                          poemTitle: vm.title,
+                        },
+                      })
+                    }
+                  />
+                ))}
+              </ScrollView>
+            </View>
 
-        <View style={styles.sectionWrap}>
-          <SectionHeader
-            title="Sher asosida aytilgan qo'shiqlar"
-            action="Barchasi"
-            onAction={book.audioAvailable ? () => router.push(`/audio/${book.id}`) : undefined}
-          />
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.audioRow}
-          >
-            {poemPreset.songs.map((song) => (
-              <CompactAudioCard
-                key={song.id}
-                item={{
-                  id: song.id,
-                  title: song.title,
-                  subtitle: song.artist,
-                  thumbnail: song.cover,
-                  durationSeconds: song.durationSeconds,
-                  views: song.views,
-                }}
-                onPress={() =>
-                  router.push({
-                    pathname: "/poem-audio/[bookId]",
-                    params: {
-                      bookId: book.id,
-                      kind: "song",
-                      itemId: song.id,
-                      title: song.title,
-                      artist: song.artist,
-                      artwork: song.cover,
-                      durationSeconds: String(song.durationSeconds),
-                      views: String(song.views),
-                      poemTitle: book.title,
-                    },
-                  })
-                }
-              />
-            ))}
-          </ScrollView>
-        </View>
+            <View style={styles.partnerRow}>
+              <View style={styles.partnerDot} />
+              <Text style={styles.partnerText}>OhangLab ilovasi bilan hamkorlikda</Text>
+            </View>
+          </>
+        ) : null}
 
-        <View style={styles.sectionWrap}>
-          <SectionHeader title="Videolar" action="Barchasi" onAction={() => router.push("/reels")} />
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.videoRow}
-          >
-            {videos.map((item) => (
-              <VideoPreviewCard
-                key={item.id}
-                item={item}
-                onPress={() => router.push({ pathname: "/reels", params: { reelId: item.id } })}
-              />
-            ))}
-          </ScrollView>
-        </View>
+        {vm.songs.length > 0 ? (
+          <View style={styles.sectionWrap}>
+            <SectionHeader
+              title="Sher asosida aytilgan qo'shiqlar"
+              action="Barchasi"
+              onAction={vm.audioAvailable ? () => router.push(`/audio/${vm.id}`) : undefined}
+              styles={styles}
+            />
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.audioRow}
+            >
+              {vm.songs.map((song) => (
+                <CompactAudioCard
+                  key={song.id}
+                  item={{
+                    id: song.id,
+                    title: song.title,
+                    subtitle: song.artist,
+                    thumbnail: song.cover,
+                    durationSeconds: song.durationSeconds,
+                    views: song.views,
+                  }}
+                  palette={palette}
+                  styles={styles}
+                  onPress={() =>
+                    router.push({
+                      pathname: "/poem-audio/[bookId]",
+                      params: {
+                        bookId: vm.id,
+                        kind: "song",
+                        itemId: song.id,
+                        title: song.title,
+                        artist: song.artist,
+                        artwork: song.cover,
+                        durationSeconds: String(song.durationSeconds),
+                        views: String(song.views),
+                        poemTitle: vm.title,
+                      },
+                    })
+                  }
+                />
+              ))}
+            </ScrollView>
+          </View>
+        ) : null}
+
+        {vm.videos.length > 0 ? (
+          <View style={styles.sectionWrap}>
+            <SectionHeader title="Videolar" action="Barchasi" onAction={() => router.push("/reels")} styles={styles} />
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.videoRow}
+            >
+              {vm.videos.map((item) => (
+                <VideoPreviewCard
+                  key={item.id}
+                  item={item}
+                  styles={styles}
+                  onPress={() => router.push({ pathname: "/reels", params: { reelId: item.id } })}
+                />
+              ))}
+            </ScrollView>
+          </View>
+        ) : null}
+        <RatingReviewBlock
+          contentType="poem"
+          contentId={vm.id}
+          title={vm.title}
+          author={vm.authorName}
+        />
       </ScrollView>
+
+      <Modal visible={infoOpen} transparent animationType="fade" onRequestClose={() => setInfoOpen(false)}>
+        <Pressable style={styles.infoBackdrop} onPress={() => setInfoOpen(false)}>
+          <Pressable style={styles.infoCard} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.infoTitle}>Asar haqida</Text>
+            {vm.moodLine ? <Text style={styles.infoDesc}>{vm.moodLine}</Text> : null}
+            {vm.publishedAt ? (
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Sana</Text>
+                <Text style={styles.infoValue}>{vm.publishedAt}</Text>
+              </View>
+            ) : null}
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Muallif</Text>
+              <Text style={styles.infoValue}>{vm.authorName}</Text>
+            </View>
+            {vm.publisherName ? (
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Nashr</Text>
+                <Text style={styles.infoValue}>{vm.publisherName}</Text>
+              </View>
+            ) : null}
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Ijro narxi</Text>
+              <Text style={styles.infoValue}>{formatLicenseFee(poemPrice)}</Text>
+            </View>
+            <View style={styles.certificatePill}>
+              <Text style={styles.certificateText}>Ushbu she'r mualliflik sertifikatiga ega</Text>
+            </View>
+            <PressableScale onPress={() => setInfoOpen(false)} style={styles.infoCloseBtn}>
+              <Text style={styles.infoCloseText}>Yopish</Text>
+            </PressableScale>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <BuyConfirmSheet
+        visible={showBuy}
+        title={vm.title}
+        priceUzs={poemPrice}
+        benefits={["She'rni kutubxonangizga qo'shish", "Doimiy kirish huquqi"]}
+        onConfirm={confirmBuy}
+        onClose={() => setShowBuy(false)}
+        promo={promo}
+      />
+      <CardPaymentSheet
+        flow={purchaseFlow}
+        title={vm.title}
+        success={{
+          kind: "content",
+          onPrimary: purchaseFlow.reset,
+          onSecondary: () => {
+            purchaseFlow.reset();
+            router.push("/library");
+          },
+        }}
+        onClose={purchaseFlow.reset}
+      />
     </Screen>
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(palette: AppTheme) {
+  return StyleSheet.create({
   missingWrap: {
     flex: 1,
     alignItems: "center",
@@ -730,14 +996,15 @@ const styles = StyleSheet.create({
     lineHeight: 44,
     fontFamily: FONT.serif,
     textAlign: "left",
-    marginTop: 14,
+    marginTop: 8,
     width: "100%",
   },
   poemAuthor: {
     color: palette.primary,
-    fontSize: 15,
-    fontWeight: "600",
-    marginTop: 10,
+    fontSize: 14,
+    fontWeight: "700",
+    letterSpacing: 0.3,
+    marginTop: 0,
     textAlign: "left",
   },
   moodLine: {
@@ -824,11 +1091,104 @@ const styles = StyleSheet.create({
   },
   licenseValue: {
     color: palette.primary,
-    fontSize: 26,
-    lineHeight: 32,
-    fontWeight: "700",
-    marginTop: 6,
+    fontSize: 22,
+    lineHeight: 28,
+    fontWeight: "800",
   },
+  licenseRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    marginBottom: 16,
+  },
+  createBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    height: 56,
+    borderRadius: 18,
+    backgroundColor: palette.primary,
+    shadowColor: palette.primary,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    elevation: 6,
+  },
+  createBtnText: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "800",
+    letterSpacing: 0.2,
+  },
+  purchaseBtnOutline: {
+    height: 50,
+    borderRadius: 16,
+    marginTop: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: "transparent",
+  },
+  purchaseBtnOutlineText: {
+    color: palette.text,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  infoBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(13,27,42,0.45)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 30,
+  },
+  infoCard: {
+    width: "100%",
+    maxWidth: 380,
+    backgroundColor: palette.bgCard,
+    borderRadius: 24,
+    padding: 22,
+  },
+  infoTitle: {
+    color: palette.text,
+    fontSize: 18,
+    fontWeight: "800",
+    fontFamily: FONT.serif,
+    marginBottom: 14,
+  },
+  infoDesc: {
+    color: "#888888",
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 14,
+  },
+  infoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 9,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: palette.border,
+  },
+  infoLabel: { color: "#888", fontSize: 13 },
+  infoValue: {
+    color: palette.text,
+    fontSize: 14,
+    fontWeight: "600",
+    flexShrink: 1,
+    textAlign: "right",
+    marginLeft: 12,
+  },
+  infoCloseBtn: {
+    marginTop: 18,
+    height: 48,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: palette.primary,
+  },
+  infoCloseText: { color: "#fff", fontSize: 14, fontWeight: "800" },
   licenseNote: {
     color: "#666666",
     fontSize: 13,
@@ -1021,4 +1381,51 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 6,
   },
-});
+  poemPaywall: {
+    marginHorizontal: 20,
+    marginTop: 18,
+    padding: 22,
+    borderRadius: 22,
+    backgroundColor: palette.bgCard,
+    borderWidth: 1,
+    borderColor: palette.border,
+    alignItems: "center",
+  },
+  poemPaywallIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: palette.soft,
+  },
+  poemPaywallTitle: {
+    color: palette.text,
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: "800",
+    fontFamily: FONT.serif,
+    textAlign: "center",
+    marginTop: 14,
+  },
+  poemPaywallText: {
+    color: palette.textDim,
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: "center",
+    marginTop: 8,
+  },
+  poemPaywallBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    height: 50,
+    borderRadius: 14,
+    paddingHorizontal: 22,
+    marginTop: 18,
+    backgroundColor: palette.primary,
+  },
+  poemPaywallBtnText: { color: "#fff", fontSize: 14, fontWeight: "800" },
+  });
+}

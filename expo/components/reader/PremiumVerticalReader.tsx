@@ -827,7 +827,7 @@ export default function PremiumVerticalReader({
 
           <View style={styles.headerCopy}>
             <Text style={[styles.headerEyebrow, { color: theme.textMuted }]} numberOfLines={1}>
-              {(authorName ?? "Adabiyot AI").toUpperCase()}
+              {(authorName ?? "AdabiyotX").toUpperCase()}
             </Text>
             <Text style={[styles.headerTitle, { color: theme.text }]} numberOfLines={1}>
               {book.title}
@@ -939,7 +939,7 @@ export default function PremiumVerticalReader({
             <View style={styles.progressSummary}>
               <Text style={[styles.progressSummaryTitle, { color: theme.textSecondary }]}>Sahifa {pageIndex + 1}</Text>
               <Text style={[styles.progressSummaryMeta, { color: theme.textMuted }]} numberOfLines={1}>
-                {currentChapterLabel || "Adabiyot AI"}
+                {currentChapterLabel || "AdabiyotX"}
               </Text>
             </View>
           </View>

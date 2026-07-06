@@ -1,14 +1,13 @@
 import createContextHook from "@nkzw/create-context-hook";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAuth } from "@/providers/AuthProvider";
+import { userScopedKey } from "@/lib/userStorage";
 
-const STORAGE_KEY = "adabiyot.state.v1";
+const STATE_BASE = "state.v1";
 
 interface PersistedState {
   savedBookIds: string[];
-  purchasedBookIds: string[];
-  purchasedArticleIds: string[];
   savedReelIds: string[];
   likedReelIds: string[];
   followedAuthorIds: string[];
@@ -32,12 +31,23 @@ export interface ReaderBookmark {
   chapterIndex: number;
 }
 
-const defaultState: PersistedState = {
+/** A brand-new (or signed-in) account starts with NO private content. */
+const EMPTY_STATE: PersistedState = {
+  savedBookIds: [],
+  savedReelIds: [],
+  likedReelIds: [],
+  followedAuthorIds: [],
+  followedPublisherIds: [],
+  history: [],
+  fontScale: 1,
+  lineHeight: 1.72,
+};
+
+/** Guest mode keeps a little demo content so the app showcases nicely. */
+const DEMO_STATE: PersistedState = {
   savedBookIds: ["b4", "b6"],
-  purchasedBookIds: ["b1", "b5"],
-  purchasedArticleIds: ["ma1"],
-  savedReelIds: ["r2"],
-  likedReelIds: ["r1", "r2"],
+  savedReelIds: [],
+  likedReelIds: [],
   followedAuthorIds: ["a2", "a5"],
   followedPublisherIds: ["p1"],
   history: [
@@ -50,44 +60,52 @@ const defaultState: PersistedState = {
 };
 
 export const [AppProvider, useApp] = createContextHook(() => {
-  const qc = useQueryClient();
-  const [state, setState] = useState<PersistedState>(defaultState);
+  const { userId, isAuthenticated, loading: authLoading } = useAuth();
 
-  const loadQuery = useQuery({
-    queryKey: ["appState"],
-    queryFn: async () => {
-      try {
-        const raw = await AsyncStorage.getItem(STORAGE_KEY);
-        if (!raw) return defaultState;
-        return { ...defaultState, ...JSON.parse(raw) } as PersistedState;
-      } catch (e) {
-        console.log("[AppProvider] load error", e);
-        return defaultState;
-      }
-    },
-  });
+  // Private app state is namespaced per account so Google / Apple / guest
+  // never share saved books, purchases, history, etc.
+  const storageKey = userScopedKey(STATE_BASE, userId);
+  const defaultsForScope = isAuthenticated ? EMPTY_STATE : DEMO_STATE;
 
+  const [state, setState] = useState<PersistedState>(defaultsForScope);
+  const [isReady, setIsReady] = useState(false);
+  const storageKeyRef = useRef(storageKey);
+  storageKeyRef.current = storageKey;
+
+  // (Re)load whenever the account scope changes — this resets in-memory state
+  // immediately on account switch, then hydrates the new account's data.
   useEffect(() => {
-    if (loadQuery.data) setState(loadQuery.data);
-  }, [loadQuery.data]);
-
-  const saveMutation = useMutation({
-    mutationFn: async (next: PersistedState) => {
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-      return next;
-    },
-  });
+    if (authLoading) return;
+    let active = true;
+    setIsReady(false);
+    setState(defaultsForScope);
+    AsyncStorage.getItem(storageKey)
+      .then((raw) => {
+        if (!active) return;
+        if (raw) {
+          setState({ ...defaultsForScope, ...(JSON.parse(raw) as PersistedState) });
+        }
+      })
+      .catch((e) => console.log("[AppProvider] load error", e))
+      .finally(() => {
+        if (active) setIsReady(true);
+      });
+    return () => {
+      active = false;
+    };
+    // defaultsForScope is derived from isAuthenticated; storageKey from userId.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storageKey, authLoading, isAuthenticated]);
 
   const update = useCallback(
     (updater: (s: PersistedState) => PersistedState) => {
       setState((prev) => {
         const next = updater(prev);
-        saveMutation.mutate(next);
-        qc.setQueryData(["appState"], next);
+        AsyncStorage.setItem(storageKeyRef.current, JSON.stringify(next)).catch(() => {});
         return next;
       });
     },
-    [saveMutation, qc]
+    []
   );
 
   const toggle = useCallback(
@@ -114,26 +132,6 @@ export const [AppProvider, useApp] = createContextHook(() => {
   const toggleFollowPublisher = useCallback(
     (id: string) => toggle("followedPublisherIds", id),
     [toggle]
-  );
-  const buyBook = useCallback(
-    (id: string) =>
-      update((s) => ({
-        ...s,
-        purchasedBookIds: s.purchasedBookIds.includes(id)
-          ? s.purchasedBookIds
-          : [...s.purchasedBookIds, id],
-      })),
-    [update]
-  );
-  const buyArticle = useCallback(
-    (id: string) =>
-      update((s) => ({
-        ...s,
-        purchasedArticleIds: s.purchasedArticleIds.includes(id)
-          ? s.purchasedArticleIds
-          : [...s.purchasedArticleIds, id],
-      })),
-    [update]
   );
   const addHistory = useCallback(
     (bookId: string) =>
@@ -231,14 +229,12 @@ export const [AppProvider, useApp] = createContextHook(() => {
   return useMemo(
     () => ({
       ...state,
-      isReady: !loadQuery.isLoading,
+      isReady,
       toggleSaveBook,
       toggleSaveReel,
       toggleLikeReel,
       toggleFollowAuthor,
       toggleFollowPublisher,
-      buyBook,
-      buyArticle,
       addHistory,
       setFontScale,
       setLineHeight,
@@ -254,14 +250,12 @@ export const [AppProvider, useApp] = createContextHook(() => {
     }),
     [
       state,
-      loadQuery.isLoading,
+      isReady,
       toggleSaveBook,
       toggleSaveReel,
       toggleLikeReel,
       toggleFollowAuthor,
       toggleFollowPublisher,
-      buyBook,
-      buyArticle,
       addHistory,
       setFontScale,
       setLineHeight,

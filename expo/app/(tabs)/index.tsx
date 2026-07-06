@@ -1,29 +1,9 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { Image } from "expo-image";
-import { router } from "expo-router";
-import {
-  Baby,
-  Bell,
-  Book,
-  BookMarked,
-  BookOpen,
-  Brain,
-  Clapperboard,
-  Feather,
-  FlaskConical,
-  GraduationCap,
-  Heart,
-  LayoutGrid,
-  Newspaper,
-  Rocket,
-  ScrollText,
-  Search,
-  Smile,
-  Sparkles,
-  Star,
-  User,
-} from "lucide-react-native";
+import { router, useFocusEffect } from "expo-router";
+import * as Haptics from "expo-haptics";
 import React, {
   memo,
   useCallback,
@@ -35,9 +15,11 @@ import React, {
 import {
   Animated,
   Dimensions,
+  Easing,
   NativeScrollEvent,
   NativeSyntheticEvent,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -46,30 +28,42 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { FONT, PressableScale } from "@/components/ui";
+import BrandLogo from "@/components/BrandLogo";
+import {
+  AnimatedPressable,
+  FadeSlideIn,
+  ScreenTransitionWrapper,
+  SlideFromLeft,
+  SlideFromRight,
+  StaggeredCard,
+  TypingText,
+} from "@/components/animations";
+import { PullRefreshIndicator } from "@/components/PullRefreshIndicator";
+import ExploreShortcutButtons from "@/components/ExploreShortcutButtons";
+import ArticleHomeCard from "@/components/ArticleHomeCard";
+import BookCover from "@/components/BookCover";
+import { usePullToRefresh } from "@/hooks/usePullToRefresh";
 import { usePublishedBooks } from "@/hooks/usePublishedBooks";
+import { useHomeArticleCards } from "@/hooks/useArticleContent";
+import { useUnreadNotificationCount } from "@/hooks/useNotifications";
+import { useProfile } from "@/providers/ProfileProvider";
+import { useTheme } from "@/providers/ThemeProvider";
+import { useBranding } from "@/providers/BrandingProvider";
+import { useAuth } from "@/providers/AuthProvider";
+import { userScopedKey } from "@/lib/userStorage";
+import VerificationBadge from "@/components/VerificationBadge";
+import { getInitials, resolveDisplayBadge } from "@/types/profile";
+import { useResponsive } from "@/hooks/useResponsive";
+import WebHome from "@/components/web/WebHome";
+import type { AppTheme } from "@/constants/colors";
 import type { DisplayBook } from "@/types/database";
 
 const { width: SW } = Dimensions.get("window");
 
-const L = {
-  bg: "#F8F5F0",
-  card: "#FFFFFF",
-  accent: "#2D6A4F",
-  accentLight: "#E8F4EE",
-  accentMid: "#52B788",
-  gold: "#D4A843",
-  text: "#1A1A1A",
-  textSub: "#5C5C5C",
-  textMuted: "#9A9A9A",
-  border: "rgba(0,0,0,0.07)",
-};
-
-const GRID_PAD = 16;
-const GRID_GAP = 10;
-const GRID_CELL = (SW - GRID_PAD * 2 - GRID_GAP * 2) / 3;
-const GRID_IMG_H = Math.floor(GRID_CELL * 1.45);
-
-type IconComp = React.ComponentType<{ color: string; size: number; strokeWidth?: number }>;
+const GRID_PAD = 20;
+const GRID_GAP = 16;
+const GRID_CELL = (SW - GRID_PAD * 2 - GRID_GAP * 1.5) / 2.5;
+const GRID_IMG_H = Math.floor(GRID_CELL * 1.46);
 
 const GENRE_CATS = ["Hammasi", "She'r", "Roman", "Hikoya", "Ssenariy", "Qissa", "Maqola", "Qo'llanma", "Darslik", "Ertak"] as const;
 const THEME_CATS = ["Hayotiy", "Fantastik", "Falsafiy", "Psixologik", "Ilmiy", "Biografik", "Bolalar"] as const;
@@ -78,27 +72,47 @@ type GenreCat = typeof GENRE_CATS[number];
 type ThemeCat = typeof THEME_CATS[number];
 type Cat = GenreCat | ThemeCat;
 
-const GENRE_ICONS: Record<GenreCat, IconComp> = {
-  Hammasi: LayoutGrid,
-  "She'r": Feather,
-  Roman: Book,
-  Hikoya: BookOpen,
-  Ssenariy: Clapperboard,
-  Qissa: ScrollText,
-  Maqola: Newspaper,
-  "Qo'llanma": BookMarked,
-  Darslik: GraduationCap,
-  Ertak: Sparkles,
+const GENRE_ICONS: Record<GenreCat, string> = {
+  Hammasi: "view-grid",
+  "She'r": "feather",
+  Roman: "book-open-page-variant",
+  Hikoya: "book-open-variant",
+  Ssenariy: "movie-open-outline",
+  Qissa: "script-text-outline",
+  Maqola: "newspaper-variant-outline",
+  "Qo'llanma": "book-education-outline",
+  Darslik: "school-outline",
+  Ertak: "magic-staff",
 };
 
-const THEME_ICONS: Record<ThemeCat, IconComp> = {
-  Hayotiy: Heart,
-  Fantastik: Rocket,
-  Falsafiy: Brain,
-  Psixologik: Smile,
-  Ilmiy: FlaskConical,
-  Biografik: User,
-  Bolalar: Baby,
+const THEME_ICONS: Record<ThemeCat, string> = {
+  Hayotiy: "heart-outline",
+  Fantastik: "rocket-launch-outline",
+  Falsafiy: "brain",
+  Psixologik: "emoticon-outline",
+  Ilmiy: "flask-outline",
+  Biografik: "account-outline",
+  Bolalar: "baby-face-outline",
+};
+
+const CATEGORY_ICON_COLORS: Record<string, string> = {
+  Hammasi: "#52B788",
+  "She'r": "#D946EF",
+  Roman: "#2563EB",
+  Hikoya: "#0EA5E9",
+  Ssenariy: "#F97316",
+  Qissa: "#A855F7",
+  Maqola: "#14B8A6",
+  "Qo'llanma": "#EAB308",
+  Darslik: "#22C55E",
+  Ertak: "#EC4899",
+  Hayotiy: "#EF4444",
+  Fantastik: "#8B5CF6",
+  Falsafiy: "#06B6D4",
+  Psixologik: "#F59E0B",
+  Ilmiy: "#10B981",
+  Biografik: "#6366F1",
+  Bolalar: "#F43F5E",
 };
 
 // ─── Chip ─────────────────────────────────────────────────────────────────────
@@ -109,28 +123,40 @@ const ChipRow = memo(function ChipRow({
   onSelect,
 }: {
   cats: readonly string[];
-  icons: Record<string, IconComp>;
+  icons: Record<string, string>;
   active: Cat;
   onSelect: (c: Cat) => void;
 }) {
+  const { colors: L } = useTheme();
   return (
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.chipRow}
+      contentContainerStyle={chipRowStyle}
     >
       {cats.map((c) => {
         const isActive = active === c;
-        const Icon = icons[c];
+        const iconName = icons[c];
+        const iconColor = isActive ? "#fff" : CATEGORY_ICON_COLORS[c] ?? L.primary;
         return (
-          <Pressable
+          <AnimatedPressable
             key={c}
             onPress={() => onSelect(c as Cat)}
-            style={[styles.chip, isActive && styles.chipActive]}
+            pressedScale={0.91}
+            style={[
+              chipBase(L),
+              isActive && { backgroundColor: L.primary, borderColor: L.primary },
+            ]}
           >
-            {Icon && <Icon color={isActive ? "#fff" : L.accent} size={13} strokeWidth={2} />}
-            <Text style={[styles.chipText, isActive && styles.chipTextActive]}>{c}</Text>
-          </Pressable>
+            {iconName && (
+              <MaterialCommunityIcons
+                name={iconName as any}
+                color={iconColor}
+                size={14}
+              />
+            )}
+            <Text style={{ color: isActive ? "#fff" : L.textDim, fontSize: 12, fontWeight: "600" }}>{c}</Text>
+          </AnimatedPressable>
         );
       })}
     </ScrollView>
@@ -138,6 +164,95 @@ const ChipRow = memo(function ChipRow({
 });
 
 // ─── Last-read card ────────────────────────────────────────────────────────────
+function RotatingLastReadGlow({
+  children,
+  theme,
+}: {
+  children: React.ReactNode;
+  theme: AppTheme;
+}) {
+  const spin = useRef(new Animated.Value(0)).current;
+  const pulse = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    spin.setValue(0);
+    const spinLoop = Animated.loop(
+      Animated.timing(spin, {
+        toValue: 1,
+        duration: 6200,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      })
+    );
+    const pulseLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 1600,
+          easing: Easing.inOut(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 0,
+          duration: 1600,
+          easing: Easing.inOut(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    spinLoop.start();
+    pulseLoop.start();
+    return () => {
+      spinLoop.stop();
+      pulseLoop.stop();
+    };
+  }, [pulse, spin]);
+
+  const rotate = spin.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0deg", "360deg"],
+  });
+  const auraOpacity = pulse.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.62, 1],
+  });
+
+  return (
+    <View style={styles.lastReadGlowFrame}>
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.lastReadGlowAura,
+          {
+            backgroundColor: theme.isDark ? "rgba(82,183,136,0.12)" : "rgba(82,183,136,0.1)",
+            shadowColor: theme.primary,
+            opacity: auraOpacity,
+          },
+        ]}
+      />
+      <View pointerEvents="none" style={styles.lastReadGlowClip}>
+        <Animated.View style={[styles.lastReadGlowRotor, { transform: [{ rotate }] }]}>
+          <LinearGradient
+            colors={[
+              "rgba(82,183,136,0.03)",
+              "rgba(82,183,136,0.56)",
+              "rgba(244,162,97,0.28)",
+              "rgba(96,165,250,0.34)",
+              "rgba(82,183,136,0.03)",
+            ]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={StyleSheet.absoluteFill}
+          />
+          <View style={[styles.lastReadGlowOrb, { backgroundColor: theme.primary }]} />
+          <View style={[styles.lastReadGlowOrbAlt, { backgroundColor: theme.gold }]} />
+        </Animated.View>
+      </View>
+      {children}
+    </View>
+  );
+}
+
 const LastReadCard = memo(function LastReadCard({
   book,
   progress,
@@ -149,11 +264,13 @@ const LastReadCard = memo(function LastReadCard({
   loading: boolean;
   onPress: () => void;
 }) {
+  const { colors: L } = useTheme();
+
   if (loading) {
     return (
-      <View style={styles.lastReadCard}>
-        <View style={styles.lastReadInner}>
-          <SkeletonBox w={72} h={100} r={12} />
+      <View style={[lastReadCardBase(L), { paddingVertical: 0 }]}>
+        <View style={{ flexDirection: "row", paddingHorizontal: 14, paddingVertical: 12, gap: 12, alignItems: "center" }}>
+          <SkeletonBox w={70} h={98} r={12} />
           <View style={{ flex: 1, gap: 10 }}>
             <SkeletonBox w="85%" h={15} r={6} />
             <SkeletonBox w="60%" h={12} r={6} />
@@ -167,20 +284,20 @@ const LastReadCard = memo(function LastReadCard({
 
   if (!book) {
     return (
-      <Pressable onPress={() => router.push("/(tabs)/tokcha")} style={styles.lastReadCard}>
+      <Pressable onPress={() => router.push("/(tabs)/tokcha")} style={lastReadCardBase(L)}>
         <LinearGradient
-          colors={["#E8F4EE", "#F0F9F4"]}
-          style={styles.lastReadEmpty}
+          colors={L.isDark ? ["#1A2A1A", "#0F1B14"] : ["#FEE2E5", "#FFF0F1"]}
+          style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 14, gap: 14 }}
         >
-          <View style={styles.lastReadEmptyIcon}>
-            <BookOpen color={L.accent} size={26} strokeWidth={1.5} />
+          <View style={{ width: 50, height: 50, borderRadius: 25, backgroundColor: L.isDark ? "rgba(82,183,136,0.18)" : "rgba(255,255,255,0.6)", alignItems: "center", justifyContent: "center" }}>
+            <MaterialCommunityIcons name="book-open-variant" size={26} color={L.primary} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.lastReadEmptyTitle}>Hali kitob boshlanmagan</Text>
-            <Text style={styles.lastReadEmptySub}>Bugun birinchi kitobingizni tanlang</Text>
+            <Text style={{ color: L.text, fontSize: 14, fontWeight: "700", fontFamily: FONT.serif }}>Hali kitob boshlanmagan</Text>
+            <Text style={{ color: L.textDim, fontSize: 12, marginTop: 3, lineHeight: 17 }}>Bugun birinchi kitobingizni tanlang</Text>
           </View>
-          <View style={styles.lastReadEmptyBtn}>
-            <Text style={styles.lastReadEmptyBtnText}>Boshlash →</Text>
+          <View style={{ backgroundColor: L.primary, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 10 }}>
+            <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }}>Boshlash →</Text>
           </View>
         </LinearGradient>
       </Pressable>
@@ -190,43 +307,79 @@ const LastReadCard = memo(function LastReadCard({
   const pct = Math.max(0, Math.min(100, Math.round(progress)));
 
   return (
-    <Pressable onPress={onPress} style={styles.lastReadCard}>
-      <View style={styles.lastReadInner}>
-        <View style={styles.lastReadCover}>
-          {book.cover ? (
-            <Image
-              source={{ uri: book.cover }}
-              style={{ width: "100%", height: "100%", borderRadius: 12 }}
-              contentFit="cover"
-            />
-          ) : (
-            <View style={styles.lastReadCoverPlaceholder}>
-              <Book color={L.accent} size={22} />
-            </View>
-          )}
-        </View>
-        <View style={styles.lastReadInfo}>
-          <View>
-            <Text style={styles.lastReadLabel}>Davom etmoqdasiz</Text>
-            <Text numberOfLines={2} style={styles.lastReadTitle}>{book.title}</Text>
-            <Text numberOfLines={1} style={styles.lastReadAuthor}>{book.authorName}</Text>
-          </View>
-          <View>
-            <View style={styles.lastReadProgressWrap}>
-              <View style={styles.lastReadProgressBg}>
-                <View style={[styles.lastReadProgressFill, { width: `${pct || 5}%` }]} />
+    <RotatingLastReadGlow theme={L}>
+      <Pressable onPress={onPress} style={lastReadCardBase(L, true)}>
+        <View style={{ flexDirection: "row", paddingHorizontal: 14, paddingVertical: 12, gap: 12, alignItems: "center" }}>
+          <View style={{ width: 78, height: 110, borderRadius: 14, overflow: "hidden", backgroundColor: L.soft }}>
+            {book.cover ? (
+              <Image
+                source={{ uri: book.cover }}
+                style={{ width: "100%", height: "100%", borderRadius: 14 }}
+                contentFit="cover"
+              />
+            ) : (
+              <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: L.soft }}>
+                <MaterialCommunityIcons name="book" size={26} color={L.primary} />
               </View>
-              <Text style={styles.lastReadProgressTxt}>{pct}%</Text>
+            )}
+          </View>
+          <View style={{ flex: 1, justifyContent: "center", gap: 9 }}>
+            <View>
+              <Text style={{ color: L.primary, fontSize: 10, fontWeight: "800", letterSpacing: 0.9, textTransform: "uppercase", marginBottom: 3 }}>Davom etamizmi?</Text>
+              <Text numberOfLines={1} style={{ color: L.text, fontSize: 15.5, fontWeight: "700", lineHeight: 20, fontFamily: FONT.serif }}>{book.title}</Text>
+              <Text numberOfLines={1} style={{ color: L.textDim, fontSize: 12, marginTop: 2 }}>{book.authorName}</Text>
             </View>
-            <View style={styles.lastReadBtn}>
-              <Text style={styles.lastReadBtnText}>Davom etish →</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <AnimatedProgressLine pct={pct} color={L.primary} trackColor={L.surface} />
+              <Text style={{ color: L.primary, fontSize: 11, fontWeight: "700", minWidth: 28, textAlign: "right" }}>{pct}%</Text>
+            </View>
+            <View style={{ alignSelf: "flex-start", backgroundColor: L.primary, paddingHorizontal: 16, paddingVertical: 7, borderRadius: 10 }}>
+              <Text style={{ color: "#fff", fontSize: 12.5, fontWeight: "800" }}>Davom etish →</Text>
             </View>
           </View>
         </View>
-      </View>
-    </Pressable>
+      </Pressable>
+    </RotatingLastReadGlow>
   );
 });
+
+function AnimatedProgressLine({
+  pct,
+  color,
+  trackColor,
+}: {
+  pct: number;
+  color: string;
+  trackColor: string;
+}) {
+  const progress = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    progress.setValue(0);
+    Animated.timing(progress, {
+      toValue: Math.max(5, Math.min(100, pct || 5)),
+      duration: 820,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [pct, progress]);
+
+  return (
+    <View style={{ flex: 1, height: 4, borderRadius: 2, backgroundColor: trackColor, overflow: "hidden" }}>
+      <Animated.View
+        style={{
+          height: "100%",
+          borderRadius: 2,
+          backgroundColor: color,
+          width: progress.interpolate({
+            inputRange: [0, 100],
+            outputRange: ["0%", "100%"],
+          }),
+        }}
+      />
+    </View>
+  );
+}
 
 // ─── Carousel item ─────────────────────────────────────────────────────────────
 const CarouselItem = memo(function CarouselItem({
@@ -244,51 +397,39 @@ const CarouselItem = memo(function CarouselItem({
   marginRight: number;
   onPress: () => void;
 }) {
+  const { colors: L } = useTheme();
   const anim = useRef(new Animated.Value(isActive ? 1 : 0)).current;
 
   useEffect(() => {
     if (isActive) {
       Animated.spring(anim, { toValue: 1, useNativeDriver: true, tension: 280, friction: 14 }).start();
     } else {
-      Animated.timing(anim, { toValue: 0, duration: 80, useNativeDriver: true }).start();
+      Animated.timing(anim, { toValue: 0, duration: 150, useNativeDriver: true }).start();
     }
   }, [isActive, anim]);
 
-  const scale = anim.interpolate({ inputRange: [0, 1], outputRange: [0.86, 1.0] });
-  const opacity = anim.interpolate({ inputRange: [0, 1], outputRange: [0.55, 1.0] });
-  const translateY = anim.interpolate({ inputRange: [0, 1], outputRange: [16, 0] });
+  const scale = anim.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1.0] });
+  const opacity = anim.interpolate({ inputRange: [0, 1], outputRange: [0.78, 1.0] });
+  const translateY = anim.interpolate({ inputRange: [0, 1], outputRange: [10, 0] });
 
   return (
     <Animated.View style={{ width: cW, height: cH, marginRight, transform: [{ scale }, { translateY }], opacity }}>
-      <Pressable
-        onPress={onPress}
-        style={{ width: cW, height: cH, borderRadius: 24, overflow: "hidden", backgroundColor: L.accentLight }}
-      >
-        {book.cover ? (
-          <Image source={{ uri: book.cover }} style={{ width: "100%", height: "100%", borderRadius: 24 }} contentFit="cover" />
-        ) : (
-          <View style={styles.carouselPlaceholder}>
-            <Book color={L.accent} size={36} strokeWidth={1.5} />
-          </View>
-        )}
-        <LinearGradient
-          colors={["transparent", "rgba(0,0,0,0.55)"]}
-          style={StyleSheet.absoluteFillObject}
-        />
-        {book.isFree && (
-          <View style={styles.carouselBadge}>
-            <Text style={styles.carouselBadgeText}>BEPUL</Text>
-          </View>
-        )}
-        {isActive && (
-          <View style={styles.carouselStarRow}>
-            <Star color={L.gold} size={12} fill={L.gold} />
-            <Star color={L.gold} size={12} fill={L.gold} />
-            <Star color={L.gold} size={12} fill={L.gold} />
-            <Star color={L.gold} size={12} fill={L.gold} />
-            <Star color={L.gold} size={12} fill={L.gold} />
-          </View>
-        )}
+      <Pressable onPress={onPress} style={{ flex: 1 }}>
+        <BookCover uri={book.cover} width={cW} radius={12} style={{ height: cH }}>
+          {isActive ? (
+            <LinearGradient colors={["transparent", "rgba(0,0,0,0.40)"]} style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: "40%" }} pointerEvents="none" />
+          ) : null}
+          {book.isFree && (
+            <View style={{ position: "absolute", top: 12, left: 12 + 16, backgroundColor: L.primary, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 8 }}>
+              <Text style={{ color: "#fff", fontSize: 9, fontWeight: "800", letterSpacing: 0.5 }}>BEPUL</Text>
+            </View>
+          )}
+          {isActive && (
+            <View style={{ position: "absolute", bottom: 14, left: 14 + 16, flexDirection: "row", gap: 2 }}>
+              {[0,1,2,3,4].map(i => <MaterialCommunityIcons key={i} name="star" color={L.gold} size={12} />)}
+            </View>
+          )}
+        </BookCover>
       </Pressable>
     </Animated.View>
   );
@@ -296,32 +437,23 @@ const CarouselItem = memo(function CarouselItem({
 
 // ─── Grid book card ────────────────────────────────────────────────────────────
 const BookGridCard = memo(function BookGridCard({ book, onPress }: { book: DisplayBook; onPress: () => void }) {
+  const { colors: L } = useTheme();
   return (
-    <PressableScale onPress={onPress} style={styles.gridCard}>
-      <View style={[styles.gridCover, { height: GRID_IMG_H }]}>
-        {book.cover ? (
-          <Image source={{ uri: book.cover }} style={{ width: "100%", height: "100%", borderRadius: 14 }} contentFit="cover" />
-        ) : (
-          <View style={styles.gridCoverPlaceholder}>
-            <Book color={L.accent} size={18} />
-          </View>
-        )}
-        <LinearGradient
-          colors={["transparent", "rgba(0,0,0,0.5)"]}
-          style={[StyleSheet.absoluteFillObject, { borderRadius: 14 }]}
-        />
-        <View style={[styles.gridBadge, { backgroundColor: book.isFree ? L.accent : "rgba(0,0,0,0.55)" }]}>
-          <Text style={styles.gridBadgeText}>{book.isFree ? "BEPUL" : `${Math.floor(book.price / 1000)}k`}</Text>
+    <PressableScale onPress={onPress} style={{ width: GRID_CELL }}>
+      <BookCover uri={book.cover} width={GRID_CELL} radius={10} placeholderIcon="book" style={{ marginBottom: 10 }}>
+        <View style={{ position: "absolute", top: 9, left: 9 + 12, backgroundColor: book.isFree ? L.primary : "rgba(0,0,0,0.58)", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 7 }}>
+          <Text style={{ color: "#fff", fontSize: 9, fontWeight: "800", letterSpacing: 0.5 }}>{book.isFree ? "BEPUL" : `${Math.floor(book.price / 1000)}k`}</Text>
         </View>
-      </View>
-      <Text numberOfLines={2} style={styles.gridTitle}>{book.title}</Text>
-      <Text numberOfLines={1} style={styles.gridAuthor}>{book.authorName}</Text>
+      </BookCover>
+      <Text numberOfLines={1} ellipsizeMode="tail" style={{ color: L.text, fontSize: 13, fontWeight: "700", lineHeight: 17 }}>{book.title}</Text>
+      <Text numberOfLines={1} ellipsizeMode="tail" style={{ color: L.textDim, fontSize: 11, marginTop: 2 }}>{book.authorName}</Text>
     </PressableScale>
   );
 });
 
 // ─── Skeleton ──────────────────────────────────────────────────────────────────
-const SkeletonBox = memo(function SkeletonBox({ w, h, r = 12 }: { w: number | string; h: number; r?: number }) {
+const SkeletonBox = memo(function SkeletonBox({ w, h, r = 12 }: { w: number | `${number}%`; h: number; r?: number }) {
+  const { colors: L } = useTheme();
   const pulse = useRef(new Animated.Value(0.4)).current;
   useEffect(() => {
     Animated.loop(
@@ -331,37 +463,164 @@ const SkeletonBox = memo(function SkeletonBox({ w, h, r = 12 }: { w: number | st
       ])
     ).start();
   }, [pulse]);
-  return <Animated.View style={{ width: w, height: h, borderRadius: r, backgroundColor: "#DDD8CE", opacity: pulse }} />;
+  return <Animated.View style={{ width: w, height: h, borderRadius: r, backgroundColor: L.surface, opacity: pulse }} />;
 });
 
+// ─── Style helpers ─────────────────────────────────────────────────────────────
+const chipRowStyle = { paddingHorizontal: 16, gap: 8 };
+
+const styles = StyleSheet.create({
+  lastReadGlowFrame: {
+    marginHorizontal: 13,
+    padding: 3,
+    borderRadius: 26,
+    overflow: "visible",
+  },
+  lastReadGlowAura: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 26,
+    shadowOpacity: 0.34,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 3,
+  },
+  lastReadGlowClip: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 26,
+    overflow: "hidden",
+  },
+  lastReadGlowRotor: {
+    position: "absolute",
+    top: -170,
+    right: -170,
+    bottom: -170,
+    left: -170,
+  },
+  lastReadGlowOrb: {
+    position: "absolute",
+    top: 118,
+    right: 116,
+    width: 168,
+    height: 168,
+    borderRadius: 84,
+    opacity: 0.34,
+  },
+  lastReadGlowOrbAlt: {
+    position: "absolute",
+    bottom: 114,
+    left: 116,
+    width: 136,
+    height: 136,
+    borderRadius: 68,
+    opacity: 0.24,
+  },
+});
+
+function chipBase(L: AppTheme) {
+  return {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 5,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: L.border,
+    backgroundColor: L.bgCard,
+    shadowColor: "#000",
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 1,
+  };
+}
+
+function lastReadCardBase(L: AppTheme, framed = false) {
+  return {
+    marginHorizontal: framed ? 0 : 16,
+    backgroundColor: L.bgCard,
+    borderRadius: 22,
+    overflow: "hidden" as const,
+    borderWidth: 1,
+    borderColor: L.border,
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 8,
+  };
+}
+
 // ─── Home screen ───────────────────────────────────────────────────────────────
+/**
+ * Selector: on web ≥ 768px render the premium {@link WebHome}; otherwise the
+ * native mobile home below, unchanged. Keeping this a thin wrapper (one hook)
+ * means the mobile screen's hook order is never affected by the breakpoint.
+ */
 export default function HomeScreen() {
+  const { isWebLayout } = useResponsive();
+  return isWebLayout ? <WebHome /> : <MobileHomeScreen />;
+}
+
+function MobileHomeScreen() {
   const insets = useSafeAreaInsets();
   const { width: sw } = useWindowDimensions();
+  const { colors: L } = useTheme();
+  const { appName } = useBranding();
+  const { profile } = useProfile();
+  const profileName = profile.displayName || profile.fullName || profile.penName || "Kitobxon";
+  const firstName = profileName.split(" ")[0];
 
   const cW = Math.floor(sw * 0.62);
   const cH = Math.floor(cW * 1.46);
   const cGap = 14;
   const cPad = (sw - cW) / 2;
+  const carouselStep = cW + cGap;
 
   const [activeCat, setActiveCat] = useState<Cat>("Hammasi");
   const [carouselIdx, setCarouselIdx] = useState(0);
   const [lastBookId, setLastBookId] = useState<string | null>(null);
   const [lastBookProgress, setLastBookProgress] = useState(0);
+  const [headerAvatarError, setHeaderAvatarError] = useState(false);
+  const { userId, refreshProfileRow } = useAuth();
 
-  const { books: supaBooks, loading: booksLoading } = usePublishedBooks();
+  useEffect(() => { setHeaderAvatarError(false); }, [profile.avatarUrl]);
+  const { count: unreadCount, refresh: refreshUnreadCount } = useUnreadNotificationCount();
+
+  const { books: supaBooks, loading: booksLoading, refetch } = usePublishedBooks();
+  const { cards: articleCards, refetch: refetchArticles } = useHomeArticleCards();
+  const handleRefresh = useCallback(async () => {
+    await Promise.all([refetch(), refetchArticles(), refreshProfileRow(), refreshUnreadCount()]);
+  }, [refetch, refetchArticles, refreshProfileRow, refreshUnreadCount]);
+  const { refreshing, replayKey, onRefresh } = usePullToRefresh(handleRefresh);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshProfileRow().catch(() => {});
+      refreshUnreadCount().catch(() => {});
+    }, [refreshProfileRow, refreshUnreadCount])
+  );
+
+  const ARTICLE_CARD_W = Math.floor(SW * 0.42);
 
   const titleOpacity = useRef(new Animated.Value(1)).current;
   const prevIdxRef = useRef(0);
+  const carouselScrollRef = useRef<ScrollView>(null);
+  const dragStartXRef = useRef(0);
+  const lastCarouselIdxRef = useRef(0);
 
   useEffect(() => {
-    AsyncStorage.multiGet(["adabiyot.last_book_id", "adabiyot.last_book_progress"])
+    AsyncStorage.multiGet([
+      userScopedKey("last_book_id", userId),
+      userScopedKey("last_book_progress", userId),
+    ])
       .then(([[, id], [, prog]]) => {
-        if (id) setLastBookId(id);
-        if (prog) setLastBookProgress(parseFloat(prog) || 0);
+        // Reset on account switch — a new account has no reading history.
+        setLastBookId(id ?? null);
+        setLastBookProgress(prog ? parseFloat(prog) || 0 : 0);
       })
       .catch(() => {});
-  }, []);
+  }, [userId]);
 
   const newBooks = useMemo(() => supaBooks.slice(0, 5), [supaBooks]);
 
@@ -372,98 +631,201 @@ export default function HomeScreen() {
 
   const gridBooks = useMemo(() => {
     const list = activeCat === "Hammasi" ? supaBooks : supaBooks.filter((b) => b.genre === activeCat);
-    return list.slice(0, 9);
+    return list.slice(0, 8);
   }, [activeCat, supaBooks]);
 
   useEffect(() => {
     if (prevIdxRef.current === carouselIdx) return;
     prevIdxRef.current = carouselIdx;
     Animated.sequence([
-      Animated.timing(titleOpacity, { toValue: 0, duration: 100, useNativeDriver: true }),
-      Animated.timing(titleOpacity, { toValue: 1, duration: 220, useNativeDriver: true }),
+      Animated.timing(titleOpacity, { toValue: 0.58, duration: 80, useNativeDriver: true }),
+      Animated.timing(titleOpacity, { toValue: 1, duration: 180, useNativeDriver: true }),
     ]).start();
   }, [carouselIdx, titleOpacity]);
 
-  const lastCarouselIdxRef = useRef(0);
-  const handleCarouselEnd = useCallback(
+  const triggerCarouselHaptic = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+  }, []);
+
+  const settleCarouselToIndex = useCallback(
+    (idx: number, animated = true, haptic = false) => {
+      if (newBooks.length === 0) return;
+      const nextIdx = Math.max(0, Math.min(idx, newBooks.length - 1));
+      const changed = nextIdx !== lastCarouselIdxRef.current;
+
+      if (changed) {
+        lastCarouselIdxRef.current = nextIdx;
+        setCarouselIdx(nextIdx);
+        if (haptic) triggerCarouselHaptic();
+      }
+
+      carouselScrollRef.current?.scrollTo({
+        x: nextIdx * carouselStep,
+        y: 0,
+        animated,
+      });
+    },
+    [carouselStep, newBooks.length, triggerCarouselHaptic]
+  );
+
+  const handleCarouselBeginDrag = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    dragStartXRef.current = e.nativeEvent.contentOffset.x;
+  }, []);
+
+  const handleCarouselEndDrag = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
       const x = e.nativeEvent.contentOffset.x;
-      const idx = Math.max(0, Math.min(Math.round(x / (cW + cGap)), newBooks.length - 1));
-      if (idx !== lastCarouselIdxRef.current) {
-        lastCarouselIdxRef.current = idx;
-        setCarouselIdx(idx);
-      }
+      const startX = dragStartXRef.current;
+      const delta = x - startX;
+      const startIdx = Math.max(0, Math.min(Math.round(startX / carouselStep), newBooks.length - 1));
+      const velocityX =
+        (e.nativeEvent as NativeScrollEvent & { velocity?: { x?: number } }).velocity?.x ?? 0;
+      const shouldAdvance = Math.abs(delta) > 18 || Math.abs(velocityX) > 0.08;
+      const direction = delta === 0 ? Math.sign(velocityX) : Math.sign(delta);
+      const nextIdx = shouldAdvance
+        ? startIdx + (direction >= 0 ? 1 : -1)
+        : Math.round(x / carouselStep);
+
+      settleCarouselToIndex(nextIdx, true, true);
     },
-    [cW, cGap, newBooks.length]
+    [carouselStep, newBooks.length, settleCarouselToIndex]
+  );
+
+  const handleCarouselMomentumEnd = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const x = e.nativeEvent.contentOffset.x;
+      settleCarouselToIndex(Math.round(x / carouselStep), false);
+    },
+    [carouselStep, settleCarouselToIndex]
   );
 
   const onBook = useCallback((id: string) => {
     router.push({ pathname: "/book/[id]", params: { id } });
   }, []);
 
+  const onArticle = useCallback((id: string) => {
+    router.push({ pathname: "/article/[id]", params: { id } });
+  }, []);
+
   const today = new Date();
   const dateStr = today.toLocaleDateString("uz-UZ", { weekday: "long", day: "numeric", month: "long" });
 
   return (
+    <ScreenTransitionWrapper type="up" style={{ backgroundColor: L.bg }} replayKey={replayKey}>
     <View style={{ flex: 1, backgroundColor: L.bg }}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 110 }}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 110 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={L.primary}
+            colors={[L.primary]}
+            progressBackgroundColor={L.bgCard}
+            progressViewOffset={insets.top}
+          />
+        }
+      >
 
         {/* ── HERO HEADER ─────────────────────────────────────────────────────── */}
-        <LinearGradient
-          colors={["#2D6A4F", "#1B4D38"]}
-          style={[styles.heroGrad, { paddingTop: insets.top + 18 }]}
-        >
-          <View style={styles.header}>
-            <View style={styles.headerLeft}>
-              <PressableScale onPress={() => router.push("/(tabs)/profile")} style={styles.avatarRing}>
-                <Image
-                  source={{ uri: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=200" }}
-                  style={{ width: "100%", height: "100%" }}
-                  contentFit="cover"
-                />
+        <View style={{ paddingBottom: 18, paddingHorizontal: 20, paddingTop: insets.top + 16, backgroundColor: L.bg }}>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+            <View style={{ flexDirection: "row", alignItems: "center" }}>
+              <FadeSlideIn delay={50} distance={10}>
+                <BrandLogo variant="logo" size={34} radius={11} style={{ marginRight: 10 }} />
+              </FadeSlideIn>
+              <FadeSlideIn delay={80} distance={10}>
+              <PressableScale onPress={() => router.push("/(tabs)/profile")} style={{ width: 54, height: 54, borderRadius: 27, borderWidth: 2.5, borderColor: L.primary, overflow: "hidden" }}>
+                {profile.avatarUrl && !headerAvatarError ? (
+                  <Image
+                    source={{ uri: profile.avatarUrl }}
+                    style={{ width: "100%", height: "100%" }}
+                    contentFit="cover"
+                    onError={() => setHeaderAvatarError(true)}
+                  />
+                ) : (
+                  <View style={{ width: "100%", height: "100%", backgroundColor: L.primary, alignItems: "center", justifyContent: "center" }}>
+                    <Text style={{ color: "#fff", fontSize: 20, fontWeight: "900", fontFamily: FONT.serif }}>
+                      {getInitials(profileName)}
+                    </Text>
+                  </View>
+                )}
               </PressableScale>
-              <View style={{ marginLeft: 12 }}>
-                <Text style={styles.dateLabel}>{dateStr}</Text>
-                <Text style={styles.greeting}>Salom, Aziz! 👋</Text>
-                <Text style={styles.greetingSub}>Bugun nima o'qiysiz?</Text>
+              </FadeSlideIn>
+              <View style={{ marginLeft: 13 }}>
+                <Text style={{ color: L.textMuted, fontSize: 11, fontWeight: "600", letterSpacing: 0.3 }}>{dateStr}</Text>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 1 }}>
+                  <TypingText
+                    phrases={[`Salom, ${firstName}`]}
+                    loop={false}
+                    typingSpeed={45}
+                    style={{ color: L.text, fontSize: 18, fontWeight: "700", fontFamily: FONT.serif }}
+                  />
+                  {(() => {
+                    // Same badge as the profile page (combined author/creator).
+                    const badgeType = resolveDisplayBadge(profile)?.type ?? profile.verificationType;
+                    return badgeType !== "none" ? (
+                      <VerificationBadge verificationType={badgeType} size="sm" />
+                    ) : null;
+                  })()}
+                </View>
+                <FadeSlideIn delay={480} distance={8}>
+                <Text style={{ color: L.textDim, fontSize: 12, marginTop: 1 }}>{appName}da bugun nima o'qiysiz?</Text>
+                </FadeSlideIn>
               </View>
             </View>
-            <View style={styles.headerRight}>
-              <PressableScale style={styles.iconBtn} onPress={() => router.push("/(tabs)/tokcha")}>
-                <Search color="#fff" size={18} strokeWidth={2} />
+            <FadeSlideIn delay={170} distance={-10} style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <PressableScale style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: L.soft, alignItems: "center", justifyContent: "center" }} onPress={() => router.push("/(tabs)/tokcha")}>
+                <Ionicons name="search" size={18} color={L.primary} />
               </PressableScale>
-              <PressableScale style={styles.iconBtn}>
-                <Bell color="#fff" size={18} strokeWidth={2} />
-                <View style={styles.notifDot} />
+              <PressableScale style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: L.soft, alignItems: "center", justifyContent: "center" }} onPress={() => router.push("/notifications")}>
+                <Ionicons name="notifications" size={18} color={L.primary} />
+                {unreadCount > 0 ? (
+                  <View style={{ position: "absolute", top: 8, right: 8, width: 8, height: 8, borderRadius: 4, backgroundColor: L.gold, borderWidth: 1.5, borderColor: L.bg }} />
+                ) : null}
               </PressableScale>
-            </View>
+            </FadeSlideIn>
           </View>
-        </LinearGradient>
+        </View>
 
         {/* ── LAST READ CARD ──────────────────────────────────────────────────── */}
-        <View style={{ marginTop: -18 }}>
+        <FadeSlideIn delay={240} distance={20} style={{ marginTop: 0 }}>
           <LastReadCard
             book={lastReadBook}
             progress={lastBookProgress}
             loading={booksLoading && !lastBookId}
             onPress={() => lastBookId && onBook(lastBookId)}
           />
-        </View>
+        </FadeSlideIn>
 
         {/* ── ADABIYOTLAR SECTION ─────────────────────────────────────────────── */}
-        <View style={[styles.sectionRow, { marginTop: 28 }]}>
-          <Text style={styles.sectionTitle}>Adabiyotlar</Text>
-          <Text style={styles.sectionSub}>Barcha asarlar</Text>
-        </View>
+        <FadeSlideIn delay={320} distance={14} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", paddingHorizontal: 20, marginBottom: 12, marginTop: 18 }}>
+          <Text style={{ color: L.text, fontSize: 22, fontWeight: "800", fontFamily: FONT.serif, letterSpacing: -0.4 }}>Adabiyotlar</Text>
+          <Text style={{ color: L.primary, fontSize: 13, fontWeight: "600" }}>Barcha asarlar</Text>
+        </FadeSlideIn>
 
         {/* ── GENRE CHIPS ─────────────────────────────────────────────────────── */}
-        <ChipRow cats={GENRE_CATS} icons={GENRE_ICONS} active={activeCat} onSelect={setActiveCat} />
-        <View style={{ marginTop: 8 }}>
+        <SlideFromLeft delay={380}>
+          <ChipRow
+            cats={GENRE_CATS}
+            icons={GENRE_ICONS}
+            active={activeCat}
+            onSelect={(next) => {
+              if (next === "Ssenariy") {
+                router.push("/screenplays");
+                return;
+              }
+              setActiveCat(next);
+            }}
+          />
+        </SlideFromLeft>
+        <SlideFromRight delay={460} style={{ marginTop: 8 }}>
           <ChipRow cats={THEME_CATS} icons={THEME_ICONS} active={activeCat} onSelect={setActiveCat} />
-        </View>
+        </SlideFromRight>
 
         {/* ── CAROUSEL ────────────────────────────────────────────────────────── */}
-        <View style={{ marginTop: 22 }}>
+        <FadeSlideIn delay={520} distance={18} style={{ marginTop: 22 }}>
           {booksLoading && newBooks.length === 0 ? (
             <View style={{ paddingHorizontal: cPad, gap: cGap, flexDirection: "row" }}>
               {[0, 1, 2].map((i) => <SkeletonBox key={i} w={cW} h={cH} r={24} />)}
@@ -471,15 +833,17 @@ export default function HomeScreen() {
           ) : newBooks.length > 0 ? (
             <>
               <ScrollView
+                ref={carouselScrollRef}
                 horizontal
                 showsHorizontalScrollIndicator={false}
-                snapToOffsets={newBooks.map((_, i) => i * (cW + cGap))}
+                snapToOffsets={newBooks.map((_, i) => i * carouselStep)}
                 disableIntervalMomentum
                 decelerationRate="fast"
                 style={{ height: cH }}
                 contentContainerStyle={{ paddingHorizontal: cPad }}
-                onMomentumScrollEnd={handleCarouselEnd}
-                onScrollEndDrag={handleCarouselEnd}
+                onScrollBeginDrag={handleCarouselBeginDrag}
+                onScrollEndDrag={handleCarouselEndDrag}
+                onMomentumScrollEnd={handleCarouselMomentumEnd}
                 scrollEventThrottle={16}
               >
                 {newBooks.map((book, index) => (
@@ -495,163 +859,104 @@ export default function HomeScreen() {
                 ))}
               </ScrollView>
 
-              <View style={styles.dotsRow}>
+              <View style={{ flexDirection: "row", justifyContent: "center", gap: 5, marginTop: 16 }}>
                 {newBooks.map((_, i) => (
-                  <View key={i} style={[styles.dot, i === carouselIdx && styles.dotActive]} />
+                  <View key={i} style={[{ width: 6, height: 6, borderRadius: 3, backgroundColor: L.surface }, i === carouselIdx && { width: 22, height: 6, backgroundColor: L.primary }]} />
                 ))}
               </View>
 
-              <Animated.View style={[styles.carouselInfo, { opacity: titleOpacity }]}>
-                <Text numberOfLines={1} style={styles.carouselTitle}>{newBooks[carouselIdx]?.title ?? ""}</Text>
-                <Text numberOfLines={1} style={styles.carouselAuthor}>{newBooks[carouselIdx]?.authorName ?? ""}</Text>
+              <Animated.View style={{ alignItems: "center", marginTop: 12, paddingHorizontal: 40, marginBottom: 4, opacity: titleOpacity }}>
+                <Text numberOfLines={1} style={{ color: L.text, fontSize: 18, fontWeight: "800", fontFamily: FONT.serif, textAlign: "center", letterSpacing: -0.3 }}>{newBooks[carouselIdx]?.title ?? ""}</Text>
+                <Text numberOfLines={1} style={{ color: L.primary, fontSize: 13, fontWeight: "600", marginTop: 4, textAlign: "center" }}>{newBooks[carouselIdx]?.authorName ?? ""}</Text>
               </Animated.View>
             </>
           ) : null}
-        </View>
+        </FadeSlideIn>
 
         {/* ── BOOK GRID ────────────────────────────────────────────────────────── */}
-        <View style={[styles.sectionRow, { marginTop: 28 }]}>
-          <Text style={styles.sectionTitle}>Top asarlar</Text>
-        </View>
+        <FadeSlideIn delay={580} distance={14} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", paddingHorizontal: 20, marginBottom: 14, marginTop: 28 }}>
+          <Text style={{ color: L.text, fontSize: 22, fontWeight: "800", fontFamily: FONT.serif, letterSpacing: -0.4 }}>Top asarlar</Text>
+        </FadeSlideIn>
         <View style={{ marginTop: 4 }}>
           {booksLoading && gridBooks.length === 0 ? (
-            <View style={styles.grid}>
-              {Array.from({ length: 6 }).map((_, i) => (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              decelerationRate="fast"
+              snapToInterval={GRID_CELL + GRID_GAP}
+              contentContainerStyle={{ paddingHorizontal: GRID_PAD, gap: GRID_GAP, paddingBottom: 8 }}
+            >
+              {Array.from({ length: 4 }).map((_, i) => (
                 <View key={i} style={{ width: GRID_CELL }}>
-                  <SkeletonBox w={GRID_CELL} h={GRID_IMG_H} r={14} />
+                  <SkeletonBox w={GRID_CELL} h={GRID_IMG_H} r={10} />
                   <View style={{ marginTop: 6, gap: 4 }}>
                     <SkeletonBox w={GRID_CELL * 0.85} h={12} r={6} />
                     <SkeletonBox w={GRID_CELL * 0.6} h={10} r={6} />
                   </View>
                 </View>
               ))}
-            </View>
+            </ScrollView>
           ) : gridBooks.length === 0 ? (
-            <View style={styles.emptyState}>
-              <BookOpen color={L.textMuted} size={32} strokeWidth={1.5} />
-              <Text style={styles.emptyText}>Bu kategoriyada kitoblar yo'q</Text>
+            <View style={{ alignItems: "center", justifyContent: "center", paddingVertical: 40, gap: 10 }}>
+              <MaterialCommunityIcons name="book-open-variant" size={32} color={L.textMuted} />
+              <Text style={{ color: L.textMuted, fontSize: 13 }}>Bu kategoriyada kitoblar yo'q</Text>
             </View>
           ) : (
-            <View style={styles.grid}>
-              {gridBooks.map((book) => (
-                <BookGridCard key={book.id} book={book} onPress={() => onBook(book.id)} />
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              decelerationRate="fast"
+              snapToInterval={GRID_CELL + GRID_GAP}
+              contentContainerStyle={{ paddingHorizontal: GRID_PAD, gap: GRID_GAP, paddingBottom: 8 }}
+            >
+              {gridBooks.map((book, index) => (
+                <StaggeredCard key={book.id} index={index}>
+                  <BookGridCard book={book} onPress={() => onBook(book.id)} />
+                </StaggeredCard>
               ))}
-            </View>
+            </ScrollView>
           )}
         </View>
 
+        {/* ── MAQOLALAR (A4 ARTICLE CARDS) ────────────────────────────────────── */}
+        {articleCards.length > 0 ? (
+          <>
+            <FadeSlideIn delay={600} distance={14} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", paddingHorizontal: 20, marginBottom: 14, marginTop: 30 }}>
+              <Text style={{ color: L.text, fontSize: 22, fontWeight: "800", fontFamily: FONT.serif, letterSpacing: -0.4 }}>Maqolalar</Text>
+              <Pressable onPress={() => router.push("/(tabs)/maqolalar")}>
+                <Text style={{ color: L.primary, fontSize: 13, fontWeight: "600" }}>Barchasi</Text>
+              </Pressable>
+            </FadeSlideIn>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              decelerationRate="fast"
+              snapToInterval={ARTICLE_CARD_W + 14}
+              contentContainerStyle={{ paddingHorizontal: GRID_PAD, gap: 14, paddingBottom: 8 }}
+            >
+              {articleCards.map((card, index) => (
+                <StaggeredCard key={card.id} index={index}>
+                  <ArticleHomeCard card={card} width={ARTICLE_CARD_W} onPress={() => onArticle(card.id)} />
+                </StaggeredCard>
+              ))}
+            </ScrollView>
+          </>
+        ) : null}
+
+        {/* ── EXPLORE SHORTCUTS ─────────────────────────────────────────────── */}
+        <FadeSlideIn delay={620} distance={14} style={{ marginTop: 28 }}>
+          <ExploreShortcutButtons />
+        </FadeSlideIn>
+
       </ScrollView>
+      <PullRefreshIndicator
+        refreshing={refreshing}
+        color={L.primary}
+        top={insets.top + 8}
+        surfaceColor={L.bgCard}
+        borderColor={L.border}
+      />
     </View>
+    </ScreenTransitionWrapper>
   );
 }
-
-// ─── Styles ────────────────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
-  heroGrad: {
-    paddingBottom: 36,
-    paddingHorizontal: 20,
-  },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  headerLeft: { flexDirection: "row", alignItems: "center" },
-  headerRight: { flexDirection: "row", alignItems: "center", gap: 10 },
-  avatarRing: {
-    width: 46, height: 46, borderRadius: 23,
-    borderWidth: 2, borderColor: "rgba(255,255,255,0.6)",
-    overflow: "hidden",
-  },
-  dateLabel: { color: "rgba(255,255,255,0.6)", fontSize: 11, fontWeight: "600", letterSpacing: 0.3 },
-  greeting: { color: "#FFFFFF", fontSize: 18, fontWeight: "700", fontFamily: FONT.serif, marginTop: 1 },
-  greetingSub: { color: "rgba(255,255,255,0.7)", fontSize: 12, marginTop: 1 },
-  iconBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: "rgba(255,255,255,0.18)",
-    alignItems: "center", justifyContent: "center",
-  },
-  notifDot: {
-    position: "absolute", top: 8, right: 8,
-    width: 8, height: 8, borderRadius: 4,
-    backgroundColor: L.gold, borderWidth: 1.5, borderColor: L.accent,
-  },
-
-  // Last-read card
-  lastReadCard: {
-    marginHorizontal: 16, backgroundColor: L.card, borderRadius: 22, overflow: "hidden",
-    shadowColor: "#000", shadowOpacity: 0.12, shadowRadius: 20, shadowOffset: { width: 0, height: 8 }, elevation: 8,
-  },
-  lastReadInner: { flexDirection: "row", padding: 16, gap: 14, alignItems: "center" },
-  lastReadCover: { width: 74, height: 104, borderRadius: 12, overflow: "hidden", backgroundColor: L.accentLight },
-  lastReadCoverPlaceholder: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: L.accentLight },
-  lastReadInfo: { flex: 1, height: 104, justifyContent: "space-between" },
-  lastReadLabel: { color: L.accent, fontSize: 10, fontWeight: "700", letterSpacing: 1, textTransform: "uppercase", marginBottom: 3 },
-  lastReadTitle: { color: L.text, fontSize: 15, fontWeight: "700", lineHeight: 20, fontFamily: FONT.serif },
-  lastReadAuthor: { color: L.textSub, fontSize: 12, marginTop: 2 },
-  lastReadProgressWrap: { flexDirection: "row", alignItems: "center", gap: 7 },
-  lastReadProgressBg: { flex: 1, height: 4, borderRadius: 2, backgroundColor: "#EEE9E0", overflow: "hidden" },
-  lastReadProgressFill: { height: "100%", borderRadius: 2, backgroundColor: L.accent },
-  lastReadProgressTxt: { color: L.accent, fontSize: 11, fontWeight: "700", minWidth: 28, textAlign: "right" },
-  lastReadBtn: { alignSelf: "flex-start", backgroundColor: L.accent, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 10, marginTop: 6 },
-  lastReadBtnText: { color: "#fff", fontSize: 12, fontWeight: "700" },
-  lastReadEmpty: { flexDirection: "row", alignItems: "center", padding: 18, gap: 14 },
-  lastReadEmptyIcon: { width: 50, height: 50, borderRadius: 25, backgroundColor: "rgba(255,255,255,0.6)", alignItems: "center", justifyContent: "center" },
-  lastReadEmptyTitle: { color: L.text, fontSize: 14, fontWeight: "700", fontFamily: FONT.serif },
-  lastReadEmptySub: { color: L.textSub, fontSize: 12, marginTop: 3, lineHeight: 17 },
-  lastReadEmptyBtn: { backgroundColor: L.accent, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 10 },
-  lastReadEmptyBtnText: { color: "#fff", fontSize: 12, fontWeight: "700" },
-
-  // Section
-  sectionRow: {
-    flexDirection: "row", justifyContent: "space-between", alignItems: "baseline",
-    paddingHorizontal: 20, marginBottom: 14,
-  },
-  sectionTitle: { color: L.text, fontSize: 22, fontWeight: "800", fontFamily: FONT.serif, letterSpacing: -0.4 },
-  sectionSub: { color: L.accent, fontSize: 13, fontWeight: "600" },
-
-  // Carousel
-  carouselPlaceholder: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: L.accentLight, borderRadius: 24 },
-  carouselBadge: {
-    position: "absolute", top: 12, left: 12,
-    backgroundColor: L.accent, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 10,
-  },
-  carouselBadgeText: { color: "#fff", fontSize: 9, fontWeight: "800", letterSpacing: 0.5 },
-  carouselStarRow: { position: "absolute", bottom: 14, left: 14, flexDirection: "row", gap: 2 },
-  dotsRow: { flexDirection: "row", justifyContent: "center", gap: 5, marginTop: 16 },
-  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#D5CCBC" },
-  dotActive: { width: 22, height: 6, backgroundColor: L.accent },
-  carouselInfo: { alignItems: "center", marginTop: 12, paddingHorizontal: 40, marginBottom: 4 },
-  carouselTitle: { color: L.text, fontSize: 18, fontWeight: "800", fontFamily: FONT.serif, textAlign: "center", letterSpacing: -0.3 },
-  carouselAuthor: { color: L.accent, fontSize: 13, fontWeight: "600", marginTop: 4, textAlign: "center" },
-
-  // Chips
-  chipRow: { paddingHorizontal: 16, gap: 8 },
-  chip: {
-    flexDirection: "row", alignItems: "center", gap: 5,
-    paddingHorizontal: 14, paddingVertical: 8,
-    borderRadius: 20, borderWidth: 1.5, borderColor: "rgba(0,0,0,0.08)",
-    backgroundColor: L.card,
-    shadowColor: "#000", shadowOpacity: 0.04, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 1,
-  },
-  chipActive: { backgroundColor: L.accent, borderColor: L.accent },
-  chipText: { color: L.textSub, fontSize: 12, fontWeight: "600" },
-  chipTextActive: { color: "#fff" },
-
-  // Grid
-  grid: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: GRID_PAD, gap: GRID_GAP },
-  gridCard: { width: GRID_CELL },
-  gridCover: {
-    width: GRID_CELL, borderRadius: 14, overflow: "hidden", backgroundColor: L.accentLight, marginBottom: 8,
-    shadowColor: "#000", shadowOpacity: 0.12, shadowRadius: 12, shadowOffset: { width: 0, height: 5 }, elevation: 4,
-  },
-  gridCoverPlaceholder: { width: "100%", height: "100%", borderRadius: 14, backgroundColor: L.accentLight, alignItems: "center", justifyContent: "center" },
-  gridBadge: { position: "absolute", top: 7, left: 7, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 7 },
-  gridBadgeText: { color: "#fff", fontSize: 8, fontWeight: "800", letterSpacing: 0.4 },
-  gridTitle: { color: L.text, fontSize: 12, fontWeight: "700", lineHeight: 16 },
-  gridAuthor: { color: L.textSub, fontSize: 11, marginTop: 2 },
-
-  // Empty
-  emptyState: { alignItems: "center", justifyContent: "center", paddingVertical: 40, gap: 10 },
-  emptyText: { color: L.textMuted, fontSize: 13 },
-});

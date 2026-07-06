@@ -1,0 +1,9 @@
+{
+  "name": "transparent-video",
+  "version": "1.0.0",
+  "description": "Transparent HEVC-alpha video view (iOS) that composites the alpha channel — unlike expo-video's AVPlayerViewController which renders opaque.",
+  "main": "index.ts",
+  "license": "MIT",
+  "author": "AdabiyotX",
+  "homepage": "https://adabiyot.uz"
+}

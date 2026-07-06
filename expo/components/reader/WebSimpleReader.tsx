@@ -486,7 +486,7 @@ export default function WebSimpleReader({
 
           <View style={styles.titleWrap}>
             <Text style={[styles.headerKicker, { color: THEME.textMuted }]} numberOfLines={1}>
-              {(authorName ?? "Adabiyot AI").toUpperCase()}
+              {(authorName ?? "AdabiyotX").toUpperCase()}
             </Text>
             <Text style={[styles.headerTitle, { color: THEME.text }]} numberOfLines={1}>
               {book.title}

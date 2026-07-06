@@ -1,5 +1,6 @@
 import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { Redirect, router, useLocalSearchParams } from "expo-router";
 import {
@@ -28,11 +29,29 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { palette } from "@/constants/colors";
+import type { AppTheme } from "@/constants/colors";
 import { FONT, PressableScale, Screen } from "@/components/ui";
 import { books, getAuthor, getBook, getBookRoute, getPublisher, type Author, type Book } from "@/mocks/content";
 import { useApp } from "@/providers/AppProvider";
 import { usePublishedBook } from "@/hooks/usePublishedBooks";
+import RatingReviewBlock from "@/components/RatingReviewBlock";
+import BookCover from "@/components/BookCover";
+import ContentHeaderActions from "@/components/ContentHeaderActions";
+import JaxongirAskBar from "@/components/JaxongirAskBar";
+import BuyConfirmSheet from "@/components/payments/BuyConfirmSheet";
+import CardPaymentSheet from "@/components/payments/CardPaymentSheet";
+import PromoPriceBlock from "@/components/payments/PromoPriceBlock";
+import {
+  createOrderInputFromPaymentProduct,
+  logCreateOrderDebug,
+  showMissingPaymentProductAlert,
+  useContentAccess,
+  usePaymentProduct,
+  usePurchaseFlow,
+} from "@/hooks/usePayments";
+import { usePromo } from "@/hooks/usePromo";
+import { useAuth } from "@/providers/AuthProvider";
+import { useTheme } from "@/providers/ThemeProvider";
 import { type DisplayBook, publisherTypeLabel } from "@/types/database";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
@@ -73,7 +92,21 @@ export default function BookDetail() {
   const { book: supabaseBook, loading: supabaseLoading } = usePublishedBook(
     mockBook ? "" : String(id ?? "")
   );
-  const { savedBookIds, purchasedBookIds, toggleSaveBook } = useApp();
+  const { savedBookIds, toggleSaveBook } = useApp();
+  const { isAuthenticated } = useAuth();
+  const access = useContentAccess("book", mockBook?.id);
+  const purchaseFlow = usePurchaseFlow();
+  const paymentProductQuery = usePaymentProduct("book", mockBook?.id);
+  const paymentProduct = paymentProductQuery.data ?? null;
+  const promo = usePromo({
+    contentType: paymentProduct?.content_type ?? "book",
+    contentId: paymentProduct?.content_id ?? mockBook?.id,
+    productId: paymentProduct?.id,
+  });
+  const [showBuy, setShowBuy] = useState(false);
+  const { colors: c, isDark } = useTheme();
+  const styles = useMemo(() => createStyles(c, isDark), [c, isDark]);
+
   const ctaGlowAnim = useRef(new Animated.Value(0)).current;
   const stickyAnim = useRef(new Animated.Value(0)).current;
   const stickyVisibleRef = useRef(false);
@@ -116,14 +149,12 @@ export default function BookDetail() {
   const handleScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
       if (!ctaLayout) return;
-
       const scrollY = event.nativeEvent.contentOffset.y;
       const ctaBottom = ctaLayout.y + ctaLayout.height;
       const ctaNearTopExit = scrollY > ctaLayout.y - 12;
       const ctaAboveViewport = ctaBottom < scrollY;
       const ctaStillBelowFirstViewport = ctaLayout.y > scrollY + SCREEN_H - 120;
       const shouldShow = (ctaNearTopExit || ctaAboveViewport) && !ctaStillBelowFirstViewport;
-
       if (shouldShow !== stickyVisibleRef.current) {
         stickyVisibleRef.current = shouldShow;
         setStickyVisible(shouldShow);
@@ -138,11 +169,11 @@ export default function BookDetail() {
         <Screen>
           <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
             <Pressable onPress={() => router.back()} style={styles.iconBtn}>
-              <ArrowLeft color={palette.text} size={20} />
+              <ArrowLeft color={c.text} size={20} />
             </Pressable>
           </View>
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-            <ActivityIndicator color={palette.primary} size="large" />
+            <ActivityIndicator color={c.primary} size="large" />
           </View>
         </Screen>
       );
@@ -154,11 +185,11 @@ export default function BookDetail() {
       <Screen>
         <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
           <Pressable onPress={() => router.back()} style={styles.iconBtn}>
-            <ArrowLeft color={palette.text} size={20} />
+            <ArrowLeft color={c.text} size={20} />
           </Pressable>
         </View>
-        <Text style={{ color: palette.text, padding: 40 }}>
-          Bu material hali Adabiyot AI Kompaniyasi tomonidan tasdiqlanmagan.
+        <Text style={{ color: c.text, padding: 40 }}>
+          Bu material hali AdabiyotX tomonidan tasdiqlanmagan.
         </Text>
       </Screen>
     );
@@ -175,51 +206,82 @@ export default function BookDetail() {
   const fallback = books.filter((b) => b.id !== book.id && b.category !== book.category);
   const related = [...sameCategory, ...fallback].slice(0, 5);
   const saved = savedBookIds.includes(book.id);
-  const purchased = purchasedBookIds.includes(book.id) || book.free;
+  const purchased = book.free || access.hasAccess;
   const totalReaders = deriveTotalReaders(book, author);
   const audioDuration = deriveAudioDuration(book);
   const ageRating = deriveAgeRating(book);
-  const bookPrice = book.free ? 0 : book.price;
-  const audioPrice = book.audioAvailable ? deriveAudioPrice(book) : 0;
-  const bundlePrice = deriveBundlePrice(bookPrice, audioPrice);
-  const originalBundlePrice = bookPrice + audioPrice;
+  // One combined price covers the e-book AND its audio narration — audio is
+  // never sold (or priced) separately.
+  const bookPrice = book.free ? 0 : paymentProduct?.amount_uzs ?? book.price;
 
   const statItems = [
     {
       key: "rating",
-      icon: <Star color={palette.primary} size={15} fill={palette.primary} />,
+      icon: <Star color={c.primary} size={15} fill={c.primary} />,
       text: `${book.rating.toFixed(1)} Reyting`,
       highlight: true,
     },
     {
       key: "duration",
-      icon: <Headphones color={palette.primary} size={15} />,
+      icon: <Headphones color={c.primary} size={15} />,
       text: audioDuration ?? "Audio yo'q",
     },
     {
       key: "readers",
-      icon: <Users color={palette.primary} size={15} />,
+      icon: <Users color={c.primary} size={15} />,
       text: `${formatCompactCount(totalReaders)} o'qilish`,
     },
     {
       key: "publisher",
-      icon: <BookOpen color={palette.primary} size={15} />,
+      icon: <BookOpen color={c.primary} size={15} />,
       text: publisher?.name ? `Nashr: ${publisher.name}` : "Nashriyot",
     },
     {
       key: "age",
-      icon: <Shield color={palette.primary} size={15} />,
+      icon: <Shield color={c.primary} size={15} />,
       text: ageRating,
     },
     {
       key: "audio",
-      icon: <Headphones color={palette.primary} size={15} />,
+      icon: <Headphones color={c.primary} size={15} />,
       text: book.audioAvailable ? "Audio mavjud" : "Audio yo'q",
     },
   ];
   const hasLongDescription = book.description.length > 140;
+  const openBuy = () => {
+    if (!isAuthenticated) {
+      router.push("/auth");
+      return;
+    }
+    if (paymentProductQuery.isLoading || paymentProductQuery.isFetching) return;
+    if (!paymentProduct) {
+      showMissingPaymentProductAlert();
+      return;
+    }
+    setShowBuy(true);
+  };
+  const confirmBuy = () => {
+    if (!paymentProduct) {
+      setShowBuy(false);
+      showMissingPaymentProductAlert();
+      return;
+    }
+    setShowBuy(false);
+    logCreateOrderDebug(paymentProduct);
+    void purchaseFlow.start(createOrderInputFromPaymentProduct(paymentProduct), { promoCode: promo.appliedCode });
+  };
   const openReader = () => {
-    router.push(book.category === "She'r" ? `/poem/${book.id}` : `/book-reader/${book.id}`);
+    // Poems gate themselves (1/4 preview for paid, full for owned/free).
+    if (book.category === "She'r") {
+      router.push(`/poem/${book.id}`);
+      return;
+    }
+    // Mock file books have no in-reader paywall, so keep the purchase gate.
+    if (!purchased) {
+      openBuy();
+      return;
+    }
+    router.push(`/book-reader/${book.id}`);
   };
 
   return (
@@ -238,24 +300,31 @@ export default function BookDetail() {
             blurRadius={Platform.OS === "web" ? 20 : 40}
           />
           <LinearGradient
-            colors={["rgba(245,241,234,0.82)", "rgba(245,241,234,0.95)", palette.bg]}
+            colors={isDark
+              ? ["rgba(13,17,23,0.55)", "rgba(13,17,23,0.90)", c.bg] as any
+              : ["rgba(245,241,234,0.82)", "rgba(245,241,234,0.95)", c.bg] as any
+            }
             style={StyleSheet.absoluteFillObject}
             locations={[0, 0.6, 1]}
           />
           <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
             <Pressable onPress={() => router.back()} style={styles.iconBtn}>
-              <ArrowLeft color={palette.text} size={20} />
+              <ArrowLeft color={c.text} size={20} />
             </Pressable>
-            <View style={{ flexDirection: "row", gap: 10 }}>
-              <Pressable style={styles.iconBtn}><Share2 color={palette.text} size={18} /></Pressable>
-              <Pressable onPress={() => toggleSaveBook(book.id)} style={styles.iconBtn}>
-                <Bookmark color={saved ? palette.gold : palette.text} fill={saved ? palette.gold : "transparent"} size={18} />
-              </Pressable>
-            </View>
+            <ContentHeaderActions
+              contentType="book"
+              contentId={book.id}
+              title={book.title}
+              author={author?.name}
+              cover={book.cover}
+              description={book.description}
+              c={c}
+              isDark={isDark}
+            />
           </View>
 
           <View style={styles.heroInner}>
-            <Image source={{ uri: book.cover }} style={styles.cover} contentFit="contain" />
+            <BookCover uri={book.cover} width={HERO_COVER_W} radius={14} size="large" />
             <View style={styles.category}>
               <Text style={styles.categoryText}>{book.category.toUpperCase()}</Text>
             </View>
@@ -268,19 +337,32 @@ export default function BookDetail() {
           </View>
         </View>
 
-        <StatBar items={statItems} />
+        <StatBar items={statItems} styles={styles} c={c} />
 
-        {!purchased ? (
-          <PurchaseOptions
-            bookPrice={bookPrice}
-            audioPrice={audioPrice}
-            bundlePrice={bundlePrice}
-            originalBundlePrice={originalBundlePrice}
-            audioAvailable={book.audioAvailable}
-          />
+        {promo.isActive && !purchased && !book.free ? (
+          <View style={{ paddingHorizontal: 20, marginTop: 14 }}>
+            <PromoPriceBlock
+              isActive={promo.isActive}
+              originalAmount={promo.pricing?.original_amount_uzs ?? bookPrice}
+              finalAmount={promo.pricing?.final_amount_uzs ?? bookPrice}
+              discountPercent={promo.pricing?.discount_percent ?? 0}
+              promoCode={promo.appliedCode ?? ""}
+              endsAt={promo.endsAt}
+            />
+          </View>
         ) : null}
 
-        {/* CTA Buttons */}
+        {!purchased ? (
+          <PressableScale onPress={openBuy}>
+            <CombinedPriceCard
+              price={bookPrice}
+              audioAvailable={book.audioAvailable}
+              styles={styles}
+              c={c}
+            />
+          </PressableScale>
+        ) : null}
+
         <View
           style={styles.actionsRow}
           onLayout={(event) =>
@@ -291,27 +373,27 @@ export default function BookDetail() {
           }
         >
           <CtaButton
-            label="O'qishni boshlash"
-            icon={<BookOpen color="#FFFFFF" size={18} />}
-            backgroundColor={palette.primary}
-            glowColors={["rgba(46,125,50,0.45)", "rgba(214,168,79,0.40)", "rgba(46,125,50,0.18)"]}
-            shadowColor={palette.primary}
-            rotation={ctaGlowRotation}
+            label="E-adabiyot"
+            icon="book-open-page-variant"
+            gradient={["#11998E", "#38EF7D"]}
+            shadowColor="#11998E"
             onPress={openReader}
+            styles={styles}
           />
 
           {book.audioAvailable ? (
             <CtaButton
-              label="Audio tinglash"
-              icon={<Headphones color="#FFFFFF" size={18} />}
-              backgroundColor="#2563EB"
-              glowColors={["rgba(37,99,235,0.45)", "rgba(214,168,79,0.40)", "rgba(37,99,235,0.16)"]}
-              shadowColor="#2563EB"
-              rotation={ctaGlowRotation}
-              onPress={() => router.push(`/audio/${book.id}`)}
+              label="Audio talqin"
+              icon="headphones"
+              gradient={["#3B6FF7", "#22D3EE"]}
+              shadowColor="#3B6FF7"
+              onPress={purchased ? () => router.push(`/audio/${book.id}`) : openBuy}
+              styles={styles}
             />
           ) : null}
         </View>
+
+        <JaxongirAskBar onPress={() => router.push(`/book-ai/${book.id}`)} />
 
         <Text style={styles.sectionTitle}>Kitob haqida</Text>
         <View style={styles.shortDescBox}>
@@ -328,7 +410,7 @@ export default function BookDetail() {
         <Text style={styles.sectionTitle}>Parcha</Text>
         <View style={styles.previewActions}>
           <PressableScale onPress={() => setExcerptVisible((value) => !value)} style={styles.previewBtn}>
-            <BookOpen color={palette.primary} size={19} />
+            <BookOpen color={c.primary} size={19} />
             <Text style={styles.previewBtnText}>Matn parchasi</Text>
           </PressableScale>
           <PressableScale
@@ -337,7 +419,7 @@ export default function BookDetail() {
             }}
             style={[styles.previewBtn, book.audioAvailable ? {} : styles.previewBtnDisabled]}
           >
-            <Headphones color={palette.primary} size={19} />
+            <Headphones color={c.primary} size={19} />
             <Text style={styles.previewBtnText}>{book.audioAvailable ? "Audio parchasi" : "Audio yo'q"}</Text>
           </PressableScale>
         </View>
@@ -347,7 +429,7 @@ export default function BookDetail() {
           </View>
         ) : null}
 
-        <SectionHeader title="Kitobdan lavhalar" action="Barchasi" />
+        <SectionHeader title="Kitobdan lavhalar" action="Barchasi" styles={styles} c={c} />
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -361,11 +443,12 @@ export default function BookDetail() {
               key={item.id + i}
               imageUri={item.cover}
               quote={item.excerpt}
+              styles={styles}
             />
           ))}
         </ScrollView>
 
-        <SectionHeader title="O'quvchilar fikri" action="Barchasi" />
+        <SectionHeader title="O'quvchilar fikri" action="Barchasi" styles={styles} c={c} />
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -382,7 +465,7 @@ export default function BookDetail() {
                   <Text style={styles.reviewName}>{review.name}</Text>
                   <View style={{ flexDirection: "row", gap: 2, marginTop: 3 }}>
                     {Array.from({ length: review.rating }).map((_, i) => (
-                      <Star key={i} color={palette.primary} fill={palette.primary} size={12} />
+                      <Star key={i} color={c.primary} fill={c.primary} size={12} />
                     ))}
                   </View>
                 </View>
@@ -392,7 +475,6 @@ export default function BookDetail() {
           ))}
         </ScrollView>
 
-        {/* Muallif */}
         {author && (
           <>
             <Text style={styles.sectionTitle}>Muallif</Text>
@@ -412,7 +494,6 @@ export default function BookDetail() {
           </>
         )}
 
-        {/* Nashriyot */}
         {publisher && (
           <>
             <Text style={styles.sectionTitle}>Nashriyot</Text>
@@ -433,7 +514,7 @@ export default function BookDetail() {
 
         {related.length > 0 ? (
           <>
-            <SectionHeader title="Shunga o'xshash" action="Barchasi" />
+            <SectionHeader title="Shunga o'xshash" action="Barchasi" styles={styles} c={c} />
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 14 }}>
               {related.map((r) => {
                 const a = getAuthor(r.authorId);
@@ -443,15 +524,11 @@ export default function BookDetail() {
                     onPress={() => router.replace(getBookRoute(r))}
                     style={styles.relatedItem}
                   >
-                    <Image source={{ uri: r.cover }} style={styles.relatedCover} contentFit="cover" />
-                    <Text style={styles.relatedTitle} numberOfLines={1}>
-                      {r.title}
-                    </Text>
-                    <Text style={styles.relatedAuthor} numberOfLines={1}>
-                      {a?.name}
-                    </Text>
+                    <BookCover uri={r.cover} width={116} radius={10} />
+                    <Text style={styles.relatedTitle} numberOfLines={1}>{r.title}</Text>
+                    <Text style={styles.relatedAuthor} numberOfLines={1}>{a?.name}</Text>
                     <View style={styles.relatedRating}>
-                      <Star color={palette.gold} fill={palette.gold} size={11} />
+                      <Star color={c.gold} fill={c.gold} size={11} />
                       <Text style={styles.relatedRatingText}>{r.rating.toFixed(1)}</Text>
                     </View>
                   </PressableScale>
@@ -470,20 +547,49 @@ export default function BookDetail() {
         rotation={ctaGlowRotation}
         pulse={ctaGlowAnim}
         onPress={openReader}
+        styles={styles}
+        c={c}
+        isDark={isDark}
+      />
+      <BuyConfirmSheet
+        visible={showBuy}
+        title={book.title}
+        priceUzs={bookPrice}
+        benefits={["Kitobni to'liq o'qish", book.audioAvailable ? "Audio talqin" : "Doimiy kirish huquqi"]}
+        onConfirm={confirmBuy}
+        onClose={() => setShowBuy(false)}
+        promo={promo}
+      />
+      <CardPaymentSheet
+        flow={purchaseFlow}
+        title={book.title}
+        success={{
+          kind: "content",
+          onPrimary: () => {
+            purchaseFlow.reset();
+            openReader();
+          },
+          onSecondary: () => {
+            purchaseFlow.reset();
+            router.push("/library");
+          },
+        }}
+        onClose={purchaseFlow.reset}
       />
     </Screen>
   );
 }
 
+type StylesType = ReturnType<typeof createStyles>;
+
 function StatBar({
   items,
+  styles,
+  c,
 }: {
-  items: {
-    key: string;
-    icon: React.ReactNode;
-    text: string;
-    highlight?: boolean;
-  }[];
+  items: { key: string; icon: React.ReactNode; text: string; highlight?: boolean }[];
+  styles: StylesType;
+  c: AppTheme;
 }) {
   return (
     <ScrollView
@@ -503,70 +609,45 @@ function StatBar({
   );
 }
 
-function PurchaseOptions({
-  bookPrice,
-  audioPrice,
-  bundlePrice,
-  originalBundlePrice,
+/**
+ * Single combined price for the e-book + (when present) its audio narration.
+ * Audio is bundled into the one purchase — never shown as a separate price.
+ */
+function CombinedPriceCard({
+  price,
   audioAvailable,
+  styles,
+  c,
 }: {
-  bookPrice: number;
-  audioPrice: number;
-  bundlePrice: number;
-  originalBundlePrice: number;
+  price: number;
   audioAvailable: boolean;
+  styles: StylesType;
+  c: AppTheme;
 }) {
   return (
     <View style={styles.purchaseBlock}>
-      <View style={styles.purchaseRow}>
-        <PurchaseOption
-          icon={<BookOpen color={palette.primary} size={18} />}
-          title="Kitobni xarid qilish"
-          price={bookPrice}
-        />
-        {audioAvailable ? (
-          <PurchaseOption
-            icon={<Headphones color={palette.primary} size={18} />}
-            title="Audio xarid qilish"
-            price={audioPrice}
-          />
-        ) : null}
-      </View>
-      {audioAvailable ? (
-        <View style={styles.bundleOption}>
-          <View style={styles.bundleIconRow}>
-            <BookOpen color={palette.primary} size={18} />
-            <Text style={styles.bundlePlus}>+</Text>
-            <Headphones color={palette.primary} size={18} />
-          </View>
-          <View style={styles.bundleTextWrap}>
-            <Text style={styles.purchaseTitle}>Tejamkor xarid</Text>
-            <Text style={styles.purchaseSub}>Kitob + audio birga</Text>
-          </View>
-          <View style={styles.bundlePriceWrap}>
-            <Text style={styles.purchasePrice}>{formatPrice(bundlePrice)}</Text>
-            <Text style={styles.oldPrice}>{formatPrice(originalBundlePrice)}</Text>
-          </View>
+      <View style={styles.bundleOption}>
+        <View style={styles.bundleIconRow}>
+          <BookOpen color={c.primary} size={18} />
+          {audioAvailable ? (
+            <>
+              <Text style={styles.bundlePlus}>+</Text>
+              <Headphones color={c.primary} size={18} />
+            </>
+          ) : null}
         </View>
-      ) : null}
-    </View>
-  );
-}
-
-function PurchaseOption({
-  icon,
-  title,
-  price,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  price: number;
-}) {
-  return (
-    <View style={styles.purchaseOption}>
-      <View style={styles.purchaseIcon}>{icon}</View>
-      <Text style={styles.purchaseTitle} numberOfLines={1}>{title}</Text>
-      <Text style={styles.purchasePrice}>{formatPrice(price)}</Text>
+        <View style={styles.bundleTextWrap}>
+          <Text style={styles.purchaseTitle}>
+            {audioAvailable ? "E-adabiyot + audio talqin" : "E-adabiyot"}
+          </Text>
+          <Text style={styles.purchaseSub}>
+            {audioAvailable ? "Bitta xarid — o'qish va tinglash" : "To'liq asarni o'qish"}
+          </Text>
+        </View>
+        <View style={styles.bundlePriceWrap}>
+          <Text style={styles.purchasePrice}>{formatPrice(price)}</Text>
+        </View>
+      </View>
     </View>
   );
 }
@@ -574,64 +655,37 @@ function PurchaseOption({
 function CtaButton({
   label,
   icon,
-  backgroundColor,
-  glowColors,
+  gradient,
   shadowColor,
-  rotation,
   onPress,
+  styles,
 }: {
   label: string;
-  icon: React.ReactNode;
-  backgroundColor: string;
-  glowColors: [string, string, string];
+  icon: string;
+  gradient: [string, string];
   shadowColor: string;
-  rotation: Animated.AnimatedInterpolation<string>;
   onPress: () => void;
+  styles: StylesType;
 }) {
   const scale = useRef(new Animated.Value(1)).current;
 
   const pressIn = useCallback(() => {
-    Animated.timing(scale, {
-      toValue: 0.98,
-      duration: 110,
-      easing: Easing.out(Easing.quad),
-      useNativeDriver: true,
-    }).start();
+    Animated.timing(scale, { toValue: 0.97, duration: 110, easing: Easing.out(Easing.quad), useNativeDriver: true }).start();
   }, [scale]);
 
   const pressOut = useCallback(() => {
-    Animated.timing(scale, {
-      toValue: 1,
-      duration: 140,
-      easing: Easing.out(Easing.quad),
-      useNativeDriver: true,
-    }).start();
+    Animated.timing(scale, { toValue: 1, duration: 140, easing: Easing.out(Easing.quad), useNativeDriver: true }).start();
   }, [scale]);
 
   return (
-    <Animated.View style={[styles.ctaEqualWrap, { transform: [{ scale }] }]}>
-      <View style={styles.ctaGlowClip}>
-        <AnimatedLinearGradient
-          colors={glowColors}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={[styles.ctaRotatingGlow, { transform: [{ rotate: rotation }] }]}
-        />
-      </View>
-      <Pressable
-        onPress={onPress}
-        onPressIn={pressIn}
-        onPressOut={pressOut}
-        style={[
-          styles.ctaButton,
-          {
-            backgroundColor,
-            shadowColor,
-          },
-        ]}
-      >
-        {icon}
-        <Text style={styles.ctaButtonText}>{label}</Text>
+    <Animated.View style={[styles.ctaEqualWrap, { transform: [{ scale }], shadowColor }]}>
+      <Pressable onPress={onPress} onPressIn={pressIn} onPressOut={pressOut} style={styles.ctaPressable}>
+        <LinearGradient colors={gradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.ctaButton}>
+          <View style={styles.ctaIconCircle}>
+            <MaterialCommunityIcons name={icon as any} size={18} color="#fff" />
+          </View>
+          <Text style={styles.ctaButtonText}>{label}</Text>
+        </LinearGradient>
       </Pressable>
     </Animated.View>
   );
@@ -646,6 +700,9 @@ function StickyReadingCta({
   rotation,
   pulse,
   onPress,
+  styles,
+  c,
+  isDark,
 }: {
   visible: boolean;
   opacity: Animated.Value;
@@ -655,6 +712,9 @@ function StickyReadingCta({
   rotation: Animated.AnimatedInterpolation<string>;
   pulse: Animated.Value;
   onPress: () => void;
+  styles: StylesType;
+  c: AppTheme;
+  isDark: boolean;
 }) {
   const textOpacity = pulse.interpolate({
     inputRange: [0, 0.5, 1],
@@ -673,9 +733,12 @@ function StickyReadingCta({
         },
       ]}
     >
-      <BlurView intensity={24} tint="light" style={StyleSheet.absoluteFillObject} />
+      <BlurView intensity={24} tint={isDark ? "dark" : "light"} style={StyleSheet.absoluteFillObject} />
       <LinearGradient
-        colors={["rgba(245,241,234,0)", "rgba(46,125,50,0.18)", "rgba(46,125,50,0.23)"]}
+        colors={isDark
+          ? ["rgba(13,17,23,0)", "rgba(46,125,50,0.15)", "rgba(46,125,50,0.20)"] as any
+          : ["rgba(245,241,234,0)", "rgba(46,125,50,0.18)", "rgba(46,125,50,0.23)"] as any
+        }
         style={StyleSheet.absoluteFillObject}
       />
       <AnimatedLinearGradient
@@ -685,7 +748,7 @@ function StickyReadingCta({
         style={[styles.stickyMovingGlow, { transform: [{ rotate: rotation }] }]}
       />
       <PressableScale onPress={onPress} style={styles.stickyButton}>
-        <BookOpen color={palette.primary} size={19} />
+        <BookOpen color={c.primary} size={19} />
         <Animated.Text style={[styles.stickyButtonText, { opacity: textOpacity }]}>
           Varaqlab ko'ramizmi?
         </Animated.Text>
@@ -694,7 +757,7 @@ function StickyReadingCta({
   );
 }
 
-function SectionHeader({ title, action }: { title: string; action?: string }) {
+function SectionHeader({ title, action, styles, c }: { title: string; action?: string; styles: StylesType; c: AppTheme }) {
   return (
     <View style={styles.sectionHeader}>
       <Text style={styles.sectionTitleInline}>{title}</Text>
@@ -707,13 +770,10 @@ function SectionHeader({ title, action }: { title: string; action?: string }) {
   );
 }
 
-function LavhaCard({ imageUri, quote }: { imageUri: string; quote: string }) {
+function LavhaCard({ imageUri, quote, styles }: { imageUri: string; quote: string; styles: StylesType }) {
   const scale = useRef(new Animated.Value(1)).current;
-
-  const onPressIn = () =>
-    Animated.spring(scale, { toValue: 0.97, useNativeDriver: true, speed: 30 }).start();
-  const onPressOut = () =>
-    Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 30 }).start();
+  const onPressIn = () => Animated.spring(scale, { toValue: 0.97, useNativeDriver: true, speed: 30 }).start();
+  const onPressOut = () => Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 30 }).start();
 
   return (
     <Pressable onPressIn={onPressIn} onPressOut={onPressOut}>
@@ -725,9 +785,7 @@ function LavhaCard({ imageUri, quote }: { imageUri: string; quote: string }) {
           locations={[0, 1]}
         />
         <View style={styles.lavhaQuote}>
-          <Text style={styles.lavhaQuoteText} numberOfLines={3}>
-            {quote}
-          </Text>
+          <Text style={styles.lavhaQuoteText} numberOfLines={3}>{quote}</Text>
         </View>
       </Animated.View>
     </Pressable>
@@ -735,12 +793,8 @@ function LavhaCard({ imageUri, quote }: { imageUri: string; quote: string }) {
 }
 
 function formatCompactCount(value: number): string {
-  if (value >= 1_000_000) {
-    return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M`;
-  }
-  if (value >= 1_000) {
-    return `${(value / 1_000).toFixed(value >= 100_000 ? 0 : 1)}K`;
-  }
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(value >= 100_000 ? 0 : 1)}K`;
   return value.toString();
 }
 
@@ -749,70 +803,44 @@ function formatPrice(value: number): string {
   return `${value.toLocaleString()} so'm`;
 }
 
-function deriveAudioPrice(book: Book): number {
-  if (!book.audioAvailable) return 0;
-  const base = Math.round((book.price * 0.62) / 1000) * 1000;
-  return Math.max(8_000, Math.min(18_000, base));
-}
-
-function deriveBundlePrice(bookPrice: number, audioPrice: number): number {
-  if (bookPrice <= 0) return audioPrice;
-  if (audioPrice <= 0) return bookPrice;
-  return Math.round(((bookPrice + audioPrice) * 0.82) / 1000) * 1000;
-}
-
 function formatAudioDuration(totalMinutes: number): string {
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
-
-  if (hours > 0 && minutes > 0) {
-    return `${hours} soat ${minutes} daq`;
-  }
-  if (hours > 0) {
-    return `${hours} soat`;
-  }
+  if (hours > 0 && minutes > 0) return `${hours} soat ${minutes} daq`;
+  if (hours > 0) return `${hours} soat`;
   return `${minutes} daq`;
 }
 
 function deriveAudioDuration(book: Book): string | null {
   if (!book.audioAvailable) return null;
-
   const bookIndex = Number.parseInt(book.id.replace("b", ""), 10) || 1;
   const baseMinutesByCategory: Record<Book["category"], number> = {
-    Hikoya: 135,
-    Roman: 180,
-    "She'r": 105,
-    "Qo'llanma": 160,
-    Darslik: 190,
-    Ertak: 95,
-    Ssenariy: 125,
-    Qissa: 195,
+    Hikoya: 135, Roman: 180, "She'r": 105, "Qo'llanma": 160,
+    Darslik: 190, Ertak: 95, Ssenariy: 125, Qissa: 195,
   };
-
-  const totalMinutes =
-    baseMinutesByCategory[book.category] + bookIndex * 7 + (book.trending ? 15 : 0);
-
+  const totalMinutes = baseMinutesByCategory[book.category] + bookIndex * 7 + (book.trending ? 15 : 0);
   return formatAudioDuration(totalMinutes);
 }
 
 function deriveAgeRating(book: Book): string {
   switch (book.category) {
-    case "Ertak":
-      return "6+";
-    case "She'r":
-    case "Hikoya":
-      return "12+";
-    case "Roman":
-    case "Qissa":
-      return "16+";
-    default:
-      return "12+";
+    case "Ertak": return "6+";
+    case "She'r": case "Hikoya": return "12+";
+    case "Roman": case "Qissa": return "16+";
+    default: return "12+";
   }
+}
+
+function deriveAgeFromGenre(genre: string): string {
+  const g = (genre || "").toLowerCase();
+  if (g.includes("ertak") || g.includes("bola")) return "6+";
+  if (g.includes("she'r") || g.includes("sher") || g.includes("hikoya")) return "12+";
+  if (g.includes("roman") || g.includes("qissa")) return "16+";
+  return "12+";
 }
 
 function deriveTotalReaders(book: Book, author?: Author): number {
   if (!author) return 0;
-
   const scale = 0.08 + (book.trending ? 0.03 : 0) + (book.free ? 0.02 : 0);
   return Math.max(18_000, Math.round((author.reads * scale) / 1000) * 1000);
 }
@@ -825,11 +853,7 @@ const supaStyles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: 6,
   },
-  pubTypeBadgeText: {
-    fontSize: 10,
-    fontWeight: "700",
-    letterSpacing: 0.3,
-  },
+  pubTypeBadgeText: { fontSize: 10, fontWeight: "700", letterSpacing: 0.3 },
   noContentBox: {
     flex: 1,
     minHeight: 56,
@@ -842,13 +866,7 @@ const supaStyles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 14,
   },
-  noContentText: {
-    color: "#888",
-    fontSize: 13,
-    fontWeight: "500",
-    textAlign: "center",
-    lineHeight: 18,
-  },
+  noContentText: { color: "#888", fontSize: 13, fontWeight: "500", textAlign: "center", lineHeight: 18 },
 });
 
 function SupabaseBookDetail({
@@ -858,66 +876,126 @@ function SupabaseBookDetail({
   book: DisplayBook;
   insets: { top: number; bottom: number };
 }) {
-  const ctaGlowAnim = useRef(new Animated.Value(0)).current;
+  const { colors: c, isDark } = useTheme();
+  const styles = useMemo(() => createStyles(c, isDark), [c, isDark]);
+  const { isAuthenticated } = useAuth();
+  const access = useContentAccess("book", book.id);
+  const purchaseFlow = usePurchaseFlow();
+  const paymentProductQuery = usePaymentProduct("book", book.id);
+  const paymentProduct = paymentProductQuery.data ?? null;
+  const promo = usePromo({
+    contentType: paymentProduct?.content_type ?? "book",
+    contentId: paymentProduct?.content_id ?? book.id,
+    productId: paymentProduct?.id,
+  });
+  const [showBuy, setShowBuy] = useState(false);
   const [descExpanded, setDescExpanded] = useState(false);
   const hasAudio = !!book.audioUrl;
   const hasLongDesc = book.description.length > 140;
-  const audioPrice = Math.max(8_000, Math.round((book.price * 0.62) / 1_000) * 1_000);
-
-  // A Supabase book always has at minimum an ID — let the reader figure out
-  // whether content blocks exist. This avoids hiding readable books just because
-  // has_internal_reader flag wasn't set by the admin.
   const hasRichContent = book.hasInternalReader || !!book.cleanedContent;
-  const hasFile = !!book.fileUrl || !!book.pdfUrl;
-  const canRead = hasRichContent || hasFile || book.source === "supabase";
 
-  const openReader = useCallback(() => {
-    console.log("📘 OPEN READER CLICKED:", {
-      bookId: book.id,
-      title: book.title,
-      status: book.status,
-      has_internal_reader: book.hasInternalReader,
-      content_mode: book.contentMode,
-      cleanedContent: !!book.cleanedContent,
-      fileUrl: book.fileUrl,
-      pdfUrl: book.pdfUrl,
-      source: book.source,
-    });
-
-    if (hasRichContent || (!hasFile && book.source === "supabase")) {
-      console.log("📘 Routing to rich-reader:", `/rich-reader/${book.id}`);
-      router.push(`/rich-reader/${book.id}`);
-    } else if (hasFile) {
-      console.log("📘 Routing to book-reader (file):", `/book-reader/${book.id}`);
-      router.push(`/book-reader/${book.id}`);
-    } else {
-      console.warn("⚠️ openReader: no readable content found for book", book.id);
-    }
-  }, [book, hasRichContent, hasFile]);
+  // ── "Varaqlab ko'ramizmi?" sticky CTA (appears on scroll) ───────────────
+  const ctaGlowAnim = useRef(new Animated.Value(0)).current;
+  const stickyAnim = useRef(new Animated.Value(0)).current;
+  const stickyVisibleRef = useRef(false);
+  const [stickyVisible, setStickyVisible] = useState(false);
+  const [ctaLayout, setCtaLayout] = useState<{ y: number; height: number } | null>(null);
 
   useEffect(() => {
     const loop = Animated.loop(
-      Animated.timing(ctaGlowAnim, {
-        toValue: 1,
-        duration: 7200,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      })
+      Animated.timing(ctaGlowAnim, { toValue: 1, duration: 7200, easing: Easing.linear, useNativeDriver: true })
     );
     loop.start();
     return () => loop.stop();
   }, [ctaGlowAnim]);
+  const ctaGlowRotation = ctaGlowAnim.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
+  useEffect(() => {
+    Animated.timing(stickyAnim, {
+      toValue: stickyVisible ? 1 : 0,
+      duration: 260,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [stickyAnim, stickyVisible]);
+  const handleScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (!ctaLayout) return;
+      const scrollY = event.nativeEvent.contentOffset.y;
+      const ctaBottom = ctaLayout.y + ctaLayout.height;
+      const shouldShow =
+        (scrollY > ctaLayout.y - 12 || ctaBottom < scrollY) &&
+        ctaLayout.y <= scrollY + SCREEN_H - 120;
+      if (shouldShow !== stickyVisibleRef.current) {
+        stickyVisibleRef.current = shouldShow;
+        setStickyVisible(shouldShow);
+      }
+    },
+    [ctaLayout]
+  );
+  const hasFile = !!book.fileUrl || !!book.pdfUrl;
+  const isPoem = book.genre === "She'r" || book.contentMode === "poem";
+  const canRead = hasRichContent || hasFile || book.source === "supabase";
+  const purchased = book.isFree || access.hasAccess;
+  const bookPrice = book.isFree ? 0 : paymentProduct?.amount_uzs ?? book.price;
+  const openBuy = useCallback(() => {
+    if (!isAuthenticated) {
+      router.push("/auth");
+      return;
+    }
+    if (paymentProductQuery.isLoading || paymentProductQuery.isFetching) return;
+    if (!paymentProduct) {
+      showMissingPaymentProductAlert();
+      return;
+    }
+    setShowBuy(true);
+  }, [isAuthenticated, paymentProduct, paymentProductQuery.isFetching, paymentProductQuery.isLoading]);
+  const confirmBuy = () => {
+    if (!paymentProduct) {
+      setShowBuy(false);
+      showMissingPaymentProductAlert();
+      return;
+    }
+    setShowBuy(false);
+    logCreateOrderDebug(paymentProduct);
+    void purchaseFlow.start(createOrderInputFromPaymentProduct(paymentProduct), { promoCode: promo.appliedCode });
+  };
 
-  const ctaGlowRotation = ctaGlowAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ["0deg", "360deg"],
-  });
+  const supaStatItems = [
+    { key: "genre", icon: <BookOpen color={c.primary} size={15} />, text: book.genre || "Kitob", highlight: true },
+    { key: "age", icon: <Shield color={c.primary} size={15} />, text: deriveAgeFromGenre(book.genre) },
+    { key: "publisher", icon: <Users color={c.primary} size={15} />, text: book.publisherName ? `Nashr: ${book.publisherName}` : "Nashriyot" },
+    { key: "audio", icon: <Headphones color={c.primary} size={15} />, text: hasAudio ? "Audio mavjud" : "Audio yo'q" },
+    { key: "price", icon: <Star color={c.primary} size={15} fill={c.primary} />, text: book.isFree ? "Bepul" : formatPrice(bookPrice) },
+  ];
+
+  const openReader = useCallback(() => {
+    if (isPoem) {
+      router.push(`/poem/${book.id}`);
+    } else if (hasRichContent || (!hasFile && book.source === "supabase")) {
+      router.push(`/rich-reader/${book.id}`);
+    } else if (hasFile) {
+      router.push(`/book-reader/${book.id}`);
+    }
+  }, [book, hasRichContent, hasFile, isPoem]);
+
+  // The poem + rich-text readers show a 1/4 "parcha" preview themselves, so we
+  // can open them straight away. File (PDF) books have no in-reader paywall, so
+  // those still require a purchase first.
+  const canPreviewInReader = isPoem || hasRichContent || (!hasFile && book.source === "supabase");
+  const openReaderOrBuy = useCallback(() => {
+    if (canPreviewInReader || purchased) openReader();
+    else openBuy();
+  }, [canPreviewInReader, purchased, openReader, openBuy]);
 
   return (
     <Screen>
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 120 }}
+        keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
+        contentContainerStyle={{ paddingBottom: 170 }}
       >
         <View style={styles.heroWrap}>
           <Image
@@ -927,17 +1005,30 @@ function SupabaseBookDetail({
             blurRadius={Platform.OS === "web" ? 20 : 40}
           />
           <LinearGradient
-            colors={["rgba(245,241,234,0.82)", "rgba(245,241,234,0.95)", palette.bg]}
+            colors={isDark
+              ? ["rgba(13,17,23,0.55)", "rgba(13,17,23,0.90)", c.bg] as any
+              : ["rgba(245,241,234,0.82)", "rgba(245,241,234,0.95)", c.bg] as any
+            }
             style={StyleSheet.absoluteFillObject}
             locations={[0, 0.6, 1]}
           />
           <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
             <Pressable onPress={() => router.back()} style={styles.iconBtn}>
-              <ArrowLeft color={palette.text} size={20} />
+              <ArrowLeft color={c.text} size={20} />
             </Pressable>
+            <ContentHeaderActions
+              contentType="book"
+              contentId={book.id}
+              title={book.title}
+              author={book.authorName}
+              cover={book.cover}
+              description={book.description}
+              c={c}
+              isDark={isDark}
+            />
           </View>
           <View style={styles.heroInner}>
-            <Image source={{ uri: book.cover }} style={styles.cover} contentFit="contain" />
+            <BookCover uri={book.cover} width={HERO_COVER_W} radius={14} size="large" />
             <View style={styles.category}>
               <Text style={styles.categoryText}>{book.genre.toUpperCase()}</Text>
             </View>
@@ -948,16 +1039,22 @@ function SupabaseBookDetail({
           </View>
         </View>
 
-        <View style={styles.actionsRow}>
+        <StatBar items={supaStatItems} styles={styles} c={c} />
+
+        <View
+          style={styles.actionsRow}
+          onLayout={(event) =>
+            setCtaLayout({ y: event.nativeEvent.layout.y, height: event.nativeEvent.layout.height })
+          }
+        >
           {canRead ? (
             <CtaButton
-              label="O'qishni boshlash"
-              icon={<BookOpen color="#FFFFFF" size={18} />}
-              backgroundColor={palette.primary}
-              glowColors={["rgba(46,125,50,0.45)", "rgba(214,168,79,0.40)", "rgba(46,125,50,0.18)"]}
-              shadowColor={palette.primary}
-              rotation={ctaGlowRotation}
-              onPress={openReader}
+              label={isPoem ? "She'rni o'qish" : "E-adabiyot"}
+              icon="book-open-page-variant"
+              gradient={["#11998E", "#38EF7D"]}
+              shadowColor="#11998E"
+              onPress={openReaderOrBuy}
+              styles={styles}
             />
           ) : (
             <View style={supaStyles.noContentBox}>
@@ -968,49 +1065,45 @@ function SupabaseBookDetail({
           )}
           {hasAudio && (
             <CtaButton
-              label="Audio tinglash"
-              icon={<Headphones color="#FFFFFF" size={18} />}
-              backgroundColor="#2563EB"
-              glowColors={["rgba(37,99,235,0.45)", "rgba(214,168,79,0.40)", "rgba(37,99,235,0.16)"]}
-              shadowColor="#2563EB"
-              rotation={ctaGlowRotation}
-              onPress={() => router.push(`/audio/${book.id}`)}
+              label="Audio talqin"
+              icon="headphones"
+              gradient={["#3B6FF7", "#22D3EE"]}
+              shadowColor="#3B6FF7"
+              onPress={purchased ? () => router.push(`/audio/${book.id}`) : openBuy}
+              styles={styles}
             />
           )}
         </View>
 
-        {!book.isFree && (
-          <View style={[styles.purchaseBlock, { marginTop: 14 }]}>
-            <View style={styles.purchaseRow}>
-              <PurchaseOption
-                icon={<BookOpen color={palette.primary} size={18} />}
-                title="Kitobni xarid qilish"
-                price={book.price}
-              />
-              {hasAudio && (
-                <PurchaseOption
-                  icon={<Headphones color={palette.primary} size={18} />}
-                  title="Audio xarid qilish"
-                  price={audioPrice}
-                />
-              )}
-            </View>
+        <JaxongirAskBar onPress={() => router.push(`/book-ai/${book.id}`)} />
+
+        {promo.isActive && !purchased && !book.isFree ? (
+          <View style={{ marginTop: 14 }}>
+            <PromoPriceBlock
+              isActive={promo.isActive}
+              originalAmount={promo.pricing?.original_amount_uzs ?? bookPrice}
+              finalAmount={promo.pricing?.final_amount_uzs ?? bookPrice}
+              discountPercent={promo.pricing?.discount_percent ?? 0}
+              promoCode={promo.appliedCode ?? ""}
+              endsAt={promo.endsAt}
+            />
           </View>
+        ) : null}
+
+        {!book.isFree && !purchased && (
+          <PressableScale onPress={openBuy} style={{ marginTop: 14 }}>
+            <CombinedPriceCard price={bookPrice} audioAvailable={hasAudio} styles={styles} c={c} />
+          </PressableScale>
         )}
 
         <Text style={styles.sectionTitle}>Kitob haqida</Text>
         <View style={styles.shortDescBox}>
-          <Text
-            style={styles.shortDescText}
-            numberOfLines={descExpanded ? undefined : 3}
-          >
+          <Text style={styles.shortDescText} numberOfLines={descExpanded ? undefined : 3}>
             {book.description || "Tavsif mavjud emas."}
           </Text>
           {hasLongDesc && (
             <Pressable onPress={() => setDescExpanded((v) => !v)} hitSlop={8}>
-              <Text style={styles.readMoreText}>
-                {descExpanded ? "Yopish" : "Batafsil"}
-              </Text>
+              <Text style={styles.readMoreText}>{descExpanded ? "Yopish" : "Batafsil"}</Text>
             </Pressable>
           )}
         </View>
@@ -1040,514 +1133,499 @@ function SupabaseBookDetail({
             </View>
           </>
         )}
+        <RatingReviewBlock
+          contentType="book"
+          contentId={book.id}
+          title={book.title}
+          author={book.authorName}
+          coverUrl={book.cover}
+        />
       </ScrollView>
+      {canRead ? (
+        <StickyReadingCta
+          visible={stickyVisible}
+          opacity={stickyAnim}
+          translateY={stickyAnim.interpolate({ inputRange: [0, 1], outputRange: [34, 0] })}
+          scale={stickyAnim.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] })}
+          bottomInset={insets.bottom}
+          rotation={ctaGlowRotation}
+          pulse={ctaGlowAnim}
+          onPress={openReaderOrBuy}
+          styles={styles}
+          c={c}
+          isDark={isDark}
+        />
+      ) : null}
+      <BuyConfirmSheet
+        visible={showBuy}
+        title={book.title}
+        priceUzs={bookPrice}
+        benefits={["Kitobni to'liq o'qish", hasAudio ? "Audio talqin" : "Doimiy kirish huquqi"]}
+        onConfirm={confirmBuy}
+        onClose={() => setShowBuy(false)}
+        promo={promo}
+      />
+      <CardPaymentSheet
+        flow={purchaseFlow}
+        title={book.title}
+        success={{
+          kind: "content",
+          onPrimary: () => {
+            purchaseFlow.reset();
+            openReader();
+          },
+          onSecondary: () => {
+            purchaseFlow.reset();
+            router.push("/library");
+          },
+        }}
+        onClose={purchaseFlow.reset}
+      />
     </Screen>
   );
 }
 
-const styles = StyleSheet.create({
-  heroWrap: { paddingBottom: 12, minHeight: 430 },
-  topBar: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 18,
-    zIndex: 4,
-  },
-  iconBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(255,255,255,0.92)",
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "rgba(46,125,50,0.08)",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.08,
-    shadowRadius: 14,
-    elevation: 3,
-  },
-  heroInner: { alignItems: "center", paddingHorizontal: 26, marginTop: 14 },
-  cover: {
-    width: HERO_COVER_W,
-    aspectRatio: 5 / 7,
-    borderRadius: 14,
-    backgroundColor: palette.bgCard,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.14,
-    shadowRadius: 18,
-    elevation: 6,
-  },
-  category: {
-    marginTop: 16,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-    backgroundColor: "#FFF4D6",
-    borderWidth: 1,
-    borderColor: "#D6A84F",
-  },
-  categoryText: { color: "#A87500", fontSize: 9, fontWeight: "900", letterSpacing: 1.5 },
-  title: {
-    color: palette.text,
-    fontSize: 27,
-    lineHeight: 32,
-    fontFamily: FONT.serif,
-    fontWeight: "700",
-    textAlign: "center",
-    marginTop: 10,
-    letterSpacing: -0.3,
-  },
-  byline: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    flexWrap: "wrap",
-    marginTop: 4,
-    gap: 6,
-  },
-  author: { color: palette.primary, fontSize: 14, fontWeight: "700" },
-  bylineDot: { color: palette.textMuted, fontSize: 13, fontWeight: "600" },
-  publisherInline: { color: palette.textMuted, fontSize: 13, fontWeight: "500" },
-  statBar: {
-    flexDirection: "row",
-    paddingHorizontal: 20,
-    paddingRight: 28,
-    gap: 8,
-    marginTop: 8,
-  },
-  statChip: {
-    minHeight: 34,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.78)",
-    borderWidth: 1,
-    borderColor: "rgba(46,125,50,0.09)",
-  },
-  statChipHighlight: {
-    backgroundColor: "rgba(232,245,233,0.82)",
-  },
-  statChipText: {
-    color: "#666666",
-    fontSize: 12,
-    fontWeight: "500",
-  },
-  statChipTextHighlight: {
-    color: palette.primary,
-    fontWeight: "600",
-  },
-  purchaseBlock: {
-    marginHorizontal: 20,
-    marginTop: 14,
-    gap: 10,
-  },
-  purchaseRow: {
-    flexDirection: "row",
-    gap: 10,
-  },
-  purchaseOption: {
-    flex: 1,
-    minHeight: 78,
-    borderRadius: 18,
-    backgroundColor: "rgba(255,255,255,0.84)",
-    borderWidth: 1,
-    borderColor: "rgba(46,125,50,0.10)",
-    padding: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.045,
-    shadowRadius: 12,
-    elevation: 2,
-  },
-  purchaseIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#E8F5E9",
-    marginBottom: 8,
-  },
-  purchaseTitle: {
-    color: palette.text,
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  purchaseSub: {
-    color: palette.textMuted,
-    fontSize: 11,
-    marginTop: 2,
-  },
-  purchasePrice: {
-    color: palette.primary,
-    fontSize: 13,
-    fontWeight: "700",
-    marginTop: 4,
-  },
-  bundleOption: {
-    minHeight: 64,
-    borderRadius: 18,
-    backgroundColor: "rgba(232,245,233,0.84)",
-    borderWidth: 1,
-    borderColor: "rgba(46,125,50,0.13)",
-    paddingHorizontal: 12,
-    paddingVertical: 11,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  bundleIconRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-  },
-  bundlePlus: {
-    color: palette.primary,
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  bundleTextWrap: { flex: 1 },
-  bundlePriceWrap: {
-    alignItems: "flex-end",
-  },
-  oldPrice: {
-    color: palette.textMuted,
-    fontSize: 11,
-    textDecorationLine: "line-through",
-    marginTop: 2,
-  },
-  actionsRow: { flexDirection: "row", paddingHorizontal: 20, gap: 12, marginTop: 16 },
-  ctaEqualWrap: {
-    flex: 1,
-    height: 56,
-    position: "relative",
-  },
-  ctaGlowClip: {
-    position: "absolute",
-    top: -4,
-    left: -4,
-    right: -4,
-    bottom: -4,
-    borderRadius: 22,
-    overflow: "hidden",
-    opacity: 0.72,
-  },
-  ctaRotatingGlow: {
-    position: "absolute",
-    width: "150%",
-    height: "190%",
-    top: "-45%",
-    left: "-25%",
-  },
-  ctaButton: {
-    height: 56,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-    gap: 8,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.18,
-    shadowRadius: 14,
-    elevation: 4,
-  },
-  ctaButtonText: { color: "#FFFFFF", fontSize: 15, fontWeight: "600", letterSpacing: 0.1 },
-  stickyCtaWrap: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    minHeight: 108,
-    paddingTop: 22,
-    paddingHorizontal: 20,
-    overflow: "hidden",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: -8 },
-    shadowOpacity: 0.08,
-    shadowRadius: 18,
-    elevation: 12,
-  },
-  stickyMovingGlow: {
-    position: "absolute",
-    width: "150%",
-    height: 160,
-    left: "-25%",
-    bottom: -76,
-    opacity: 0.55,
-  },
-  stickyButton: {
-    height: 56,
-    borderRadius: 999,
-    backgroundColor: "#FFFFFF",
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-    gap: 9,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.12,
-    shadowRadius: 18,
-    elevation: 5,
-  },
-  stickyButtonText: {
-    color: palette.primary,
-    fontSize: 16,
-    fontWeight: "700",
-    letterSpacing: 0.1,
-  },
-  buyBtn: {
-    marginHorizontal: 20,
-    marginTop: 10,
-    height: 48,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "transparent",
-    borderWidth: 1.2,
-    borderColor: "rgba(46,125,50,0.25)",
-  },
-  buyText: { color: palette.text, fontSize: 14, fontWeight: "800" },
-  shortDescBox: {
-    marginHorizontal: 20,
-    paddingHorizontal: 15,
-    paddingVertical: 13,
-    borderRadius: 16,
-    backgroundColor: "rgba(255,255,255,0.86)",
-    borderWidth: 1,
-    borderColor: "rgba(46,125,50,0.10)",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.045,
-    shadowRadius: 12,
-    elevation: 2,
-  },
-  shortDescText: {
-    color: "#444",
-    fontSize: 14,
-    lineHeight: 21,
-    fontWeight: "500",
-  },
-  readMoreText: {
-    color: palette.primary,
-    fontSize: 13,
-    fontWeight: "800",
-    marginTop: 8,
-  },
-  previewActions: {
-    flexDirection: "row",
-    gap: 10,
-    paddingHorizontal: 20,
-  },
-  previewBtn: {
-    flex: 1,
-    height: 50,
-    borderRadius: 16,
-    backgroundColor: "rgba(255,255,255,0.86)",
-    borderWidth: 1,
-    borderColor: "rgba(46,125,50,0.12)",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.04,
-    shadowRadius: 10,
-    elevation: 2,
-  },
-  previewBtnDisabled: {
-    opacity: 0.55,
-  },
-  previewBtnText: {
-    color: palette.text,
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  lavhaCard: {
-    width: LAVHA_CARD_W,
-    height: LAVHA_CARD_H,
-    borderRadius: 20,
-    overflow: "hidden",
-    backgroundColor: palette.bgCard,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.09,
-    shadowRadius: 14,
-    elevation: 4,
-  },
-  lavhaCardImg: {
-    width: "100%",
-    height: "100%",
-  },
-  lavhaOverlay: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: "58%",
-  },
-  lavhaQuote: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    padding: 16,
-  },
-  lavhaQuoteText: {
-    color: "#fff",
-    fontSize: 14,
-    lineHeight: 20,
-    fontStyle: "italic",
-    fontFamily: FONT.serif,
-    textShadowColor: "rgba(0,0,0,0.35)",
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
-  },
-  reviewCard: {
-    width: REVIEW_CARD_W,
-    minHeight: 132,
-    padding: 15,
-    borderRadius: 18,
-    backgroundColor: palette.bgCard,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.055,
-    shadowRadius: 12,
-    elevation: 3,
-  },
-  reviewHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 9,
-  },
-  reviewAvatar: { width: 40, height: 40, borderRadius: 20 },
-  reviewName: { color: palette.text, fontSize: 14, fontWeight: "800" },
-  reviewText: { color: "#444", fontSize: 13, lineHeight: 19 },
-  authorMeta: { color: palette.secondary, fontSize: 12, fontWeight: "700", marginTop: 3 },
-  infoCard: {
-    marginHorizontal: 20,
-    padding: 14,
-    borderRadius: 18,
-    backgroundColor: palette.bgCard,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.055,
-    shadowRadius: 12,
-    elevation: 3,
-  },
-  infoCardRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 9,
-  },
-  infoCardBtn: {
-    marginTop: 12,
-    height: 38,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1.2,
-    borderColor: "rgba(46,125,50,0.25)",
-    backgroundColor: "transparent",
-  },
-  infoCardBtnText: { color: palette.primary, fontSize: 13, fontWeight: "800" },
-  sectionHeader: {
-    paddingHorizontal: 20,
-    marginTop: 22,
-    marginBottom: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  sectionTitleInline: {
-    color: palette.text,
-    fontSize: 18,
-    fontWeight: "800",
-    letterSpacing: -0.2,
-  },
-  sectionAction: {
-    color: palette.primary,
-    fontSize: 13,
-    fontWeight: "800",
-  },
-  sectionTitle: {
-    color: palette.text,
-    fontSize: 18,
-    fontWeight: "800",
-    paddingHorizontal: 20,
-    marginTop: 22,
-    marginBottom: 10,
-    letterSpacing: -0.2,
-  },
-  excerptBox: {
-    marginHorizontal: 20,
-    paddingHorizontal: 15,
-    paddingVertical: 13,
-    borderRadius: 16,
-    backgroundColor: palette.bgCard,
-    borderLeftWidth: 3,
-    borderLeftColor: palette.primary,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.045,
-    shadowRadius: 12,
-    elevation: 2,
-  },
-  excerptText: {
-    color: palette.text,
-    fontSize: 14,
-    lineHeight: 22,
-    fontStyle: "italic",
-    fontFamily: FONT.serif,
-  },
-  authorPhoto: { width: 48, height: 48, borderRadius: 24 },
-  authorName: { color: palette.text, fontSize: 15, fontWeight: "800" },
-  authorBio: { color: "#444", fontSize: 13, lineHeight: 19 },
-  pubLogo: { width: 44, height: 44, borderRadius: 12 },
-  pubName: { color: palette.text, fontSize: 15, fontWeight: "800" },
-  pubAbout: { color: "#444", fontSize: 13, lineHeight: 19 },
-  relatedItem: {
-    width: 116,
-    paddingBottom: 4,
-  },
-  relatedCover: {
-    width: 116,
-    height: 166,
-    borderRadius: 10,
-    backgroundColor: palette.bgCard,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.12,
-    shadowRadius: 12,
-    elevation: 4,
-  },
-  relatedTitle: {
-    color: palette.text,
-    fontSize: 13,
-    fontWeight: "800",
-    marginTop: 8,
-  },
-  relatedAuthor: {
-    color: palette.textMuted,
-    fontSize: 11,
-    marginTop: 2,
-  },
-  relatedRating: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    marginTop: 4,
-  },
-  relatedRatingText: {
-    color: palette.gold,
-    fontSize: 11,
-    fontWeight: "800",
-  },
-});
+function createStyles(c: AppTheme, isDark: boolean) {
+  return StyleSheet.create({
+    heroWrap: { paddingBottom: 12, minHeight: 430 },
+    topBar: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      paddingHorizontal: 18,
+      zIndex: 4,
+    },
+    iconBtn: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: isDark ? "rgba(28,33,40,0.92)" : "rgba(255,255,255,0.92)",
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 1,
+      borderColor: c.border,
+      shadowColor: "#000",
+      shadowOffset: { width: 0, height: 5 },
+      shadowOpacity: 0.08,
+      shadowRadius: 14,
+      elevation: 3,
+    },
+    heroInner: { alignItems: "center", paddingHorizontal: 26, marginTop: 14 },
+    cover: {
+      width: HERO_COVER_W,
+      aspectRatio: 5 / 7,
+      borderRadius: 14,
+      backgroundColor: c.bgCard,
+      shadowColor: "#000",
+      shadowOffset: { width: 0, height: 10 },
+      shadowOpacity: 0.14,
+      shadowRadius: 18,
+      elevation: 6,
+    },
+    category: {
+      marginTop: 16,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 999,
+      backgroundColor: isDark ? "rgba(244,162,97,0.15)" : "#FFF4D6",
+      borderWidth: 1,
+      borderColor: isDark ? "rgba(244,162,97,0.35)" : "#D6A84F",
+    },
+    categoryText: { color: isDark ? "#F4A261" : "#A87500", fontSize: 9, fontWeight: "900", letterSpacing: 1.5 },
+    title: {
+      color: c.text,
+      fontSize: 27,
+      lineHeight: 32,
+      fontFamily: FONT.serif,
+      fontWeight: "700",
+      textAlign: "center",
+      marginTop: 10,
+      letterSpacing: -0.3,
+    },
+    byline: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      flexWrap: "wrap",
+      marginTop: 4,
+      gap: 6,
+    },
+    author: { color: c.primary, fontSize: 14, fontWeight: "700" },
+    bylineDot: { color: c.textMuted, fontSize: 13, fontWeight: "600" },
+    publisherInline: { color: c.textMuted, fontSize: 13, fontWeight: "500" },
+    statBar: {
+      flexDirection: "row",
+      paddingHorizontal: 20,
+      paddingRight: 28,
+      gap: 8,
+      marginTop: 8,
+    },
+    statChip: {
+      minHeight: 34,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      paddingHorizontal: 10,
+      paddingVertical: 7,
+      borderRadius: 999,
+      backgroundColor: isDark ? c.bgCard : "rgba(255,255,255,0.78)",
+      borderWidth: 1,
+      borderColor: c.border,
+    },
+    statChipHighlight: {
+      backgroundColor: isDark ? "rgba(82,183,136,0.12)" : "rgba(232,245,233,0.82)",
+    },
+    statChipText: {
+      color: c.textDim,
+      fontSize: 12,
+      fontWeight: "500",
+    },
+    statChipTextHighlight: {
+      color: c.primary,
+      fontWeight: "600",
+    },
+    purchaseBlock: {
+      marginHorizontal: 20,
+      marginTop: 14,
+      gap: 10,
+    },
+    purchaseRow: {
+      flexDirection: "row",
+      gap: 10,
+    },
+    purchaseOption: {
+      flex: 1,
+      minHeight: 78,
+      borderRadius: 18,
+      backgroundColor: c.bgCard,
+      borderWidth: 1,
+      borderColor: c.border,
+      padding: 12,
+      shadowColor: "#000",
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.045,
+      shadowRadius: 12,
+      elevation: 2,
+    },
+    purchaseIcon: {
+      width: 32,
+      height: 32,
+      borderRadius: 12,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.soft,
+      marginBottom: 8,
+    },
+    purchaseTitle: {
+      color: c.text,
+      fontSize: 13,
+      fontWeight: "600",
+    },
+    purchaseSub: {
+      color: c.textMuted,
+      fontSize: 11,
+      marginTop: 2,
+    },
+    purchasePrice: {
+      color: c.primary,
+      fontSize: 13,
+      fontWeight: "700",
+      marginTop: 4,
+    },
+    bundleOption: {
+      minHeight: 64,
+      borderRadius: 18,
+      backgroundColor: c.soft,
+      borderWidth: 1,
+      borderColor: c.borderStrong,
+      paddingHorizontal: 12,
+      paddingVertical: 11,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+    },
+    bundleIconRow: { flexDirection: "row", alignItems: "center", gap: 3 },
+    bundlePlus: { color: c.primary, fontSize: 13, fontWeight: "700" },
+    bundleTextWrap: { flex: 1 },
+    bundlePriceWrap: { alignItems: "flex-end" },
+    oldPrice: {
+      color: c.textMuted,
+      fontSize: 11,
+      textDecorationLine: "line-through",
+      marginTop: 2,
+    },
+    actionsRow: { flexDirection: "row", paddingHorizontal: 20, gap: 12, marginTop: 16 },
+    ctaEqualWrap: {
+      flex: 1,
+      height: 56,
+      borderRadius: 16,
+      shadowOffset: { width: 0, height: 7 },
+      shadowOpacity: 0.32,
+      shadowRadius: 13,
+      elevation: 6,
+    },
+    ctaPressable: { flex: 1, borderRadius: 16, overflow: "hidden" },
+    ctaButton: { flex: 1, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 9 },
+    ctaIconCircle: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      backgroundColor: "rgba(255,255,255,0.22)",
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    ctaButtonText: { color: "#FFFFFF", fontSize: 15, fontWeight: "800", letterSpacing: 0.2 },
+    stickyCtaWrap: {
+      position: "absolute",
+      left: 0,
+      right: 0,
+      bottom: 0,
+      minHeight: 108,
+      paddingTop: 22,
+      paddingHorizontal: 20,
+      overflow: "hidden",
+      shadowColor: "#000",
+      shadowOffset: { width: 0, height: -8 },
+      shadowOpacity: 0.08,
+      shadowRadius: 18,
+      elevation: 12,
+    },
+    stickyMovingGlow: {
+      position: "absolute",
+      width: "150%",
+      height: 160,
+      left: "-25%",
+      bottom: -76,
+      opacity: 0.55,
+    },
+    stickyButton: {
+      height: 56,
+      borderRadius: 999,
+      backgroundColor: c.bgCard,
+      alignItems: "center",
+      justifyContent: "center",
+      flexDirection: "row",
+      gap: 9,
+      shadowColor: "#000",
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: 0.12,
+      shadowRadius: 18,
+      elevation: 5,
+    },
+    stickyButtonText: {
+      color: c.primary,
+      fontSize: 16,
+      fontWeight: "700",
+      letterSpacing: 0.1,
+    },
+    buyBtn: {
+      marginHorizontal: 20,
+      marginTop: 10,
+      height: 48,
+      borderRadius: 18,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: "transparent",
+      borderWidth: 1.2,
+      borderColor: c.borderStrong,
+    },
+    buyText: { color: c.text, fontSize: 14, fontWeight: "800" },
+    shortDescBox: {
+      marginHorizontal: 20,
+      paddingHorizontal: 15,
+      paddingVertical: 13,
+      borderRadius: 16,
+      backgroundColor: c.bgCard,
+      borderWidth: 1,
+      borderColor: c.border,
+      shadowColor: "#000",
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.045,
+      shadowRadius: 12,
+      elevation: 2,
+    },
+    shortDescText: {
+      color: c.textDim,
+      fontSize: 14,
+      lineHeight: 21,
+      fontWeight: "500",
+    },
+    readMoreText: {
+      color: c.primary,
+      fontSize: 13,
+      fontWeight: "800",
+      marginTop: 8,
+    },
+    previewActions: {
+      flexDirection: "row",
+      gap: 10,
+      paddingHorizontal: 20,
+    },
+    previewBtn: {
+      flex: 1,
+      height: 50,
+      borderRadius: 16,
+      backgroundColor: c.bgCard,
+      borderWidth: 1,
+      borderColor: c.border,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
+      shadowColor: "#000",
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.04,
+      shadowRadius: 10,
+      elevation: 2,
+    },
+    previewBtnDisabled: { opacity: 0.55 },
+    previewBtnText: {
+      color: c.text,
+      fontSize: 14,
+      fontWeight: "600",
+    },
+    lavhaCard: {
+      width: LAVHA_CARD_W,
+      height: LAVHA_CARD_H,
+      borderRadius: 20,
+      overflow: "hidden",
+      backgroundColor: c.bgCard,
+      shadowColor: "#000",
+      shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: 0.09,
+      shadowRadius: 14,
+      elevation: 4,
+    },
+    lavhaCardImg: { width: "100%", height: "100%" },
+    lavhaOverlay: {
+      position: "absolute",
+      bottom: 0,
+      left: 0,
+      right: 0,
+      height: "58%",
+    },
+    lavhaQuote: {
+      position: "absolute",
+      bottom: 0,
+      left: 0,
+      right: 0,
+      padding: 16,
+    },
+    lavhaQuoteText: {
+      color: "#fff",
+      fontSize: 14,
+      lineHeight: 20,
+      fontStyle: "italic",
+      fontFamily: FONT.serif,
+      textShadowColor: "rgba(0,0,0,0.35)",
+      textShadowOffset: { width: 0, height: 1 },
+      textShadowRadius: 4,
+    },
+    reviewCard: {
+      width: REVIEW_CARD_W,
+      minHeight: 132,
+      padding: 15,
+      borderRadius: 18,
+      backgroundColor: c.bgCard,
+      borderWidth: 1,
+      borderColor: c.border,
+      shadowColor: "#000",
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.055,
+      shadowRadius: 12,
+      elevation: 3,
+    },
+    reviewHeader: { flexDirection: "row", alignItems: "center", marginBottom: 9 },
+    reviewAvatar: { width: 40, height: 40, borderRadius: 20 },
+    reviewName: { color: c.text, fontSize: 14, fontWeight: "800" },
+    reviewText: { color: c.textDim, fontSize: 13, lineHeight: 19 },
+    authorMeta: { color: c.secondary, fontSize: 12, fontWeight: "700", marginTop: 3 },
+    infoCard: {
+      marginHorizontal: 20,
+      padding: 14,
+      borderRadius: 18,
+      backgroundColor: c.bgCard,
+      borderWidth: 1,
+      borderColor: c.border,
+      shadowColor: "#000",
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.055,
+      shadowRadius: 12,
+      elevation: 3,
+    },
+    infoCardRow: { flexDirection: "row", alignItems: "center", marginBottom: 9 },
+    infoCardBtn: {
+      marginTop: 12,
+      height: 38,
+      borderRadius: 12,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 1.2,
+      borderColor: c.borderStrong,
+      backgroundColor: "transparent",
+    },
+    infoCardBtnText: { color: c.primary, fontSize: 13, fontWeight: "800" },
+    sectionHeader: {
+      paddingHorizontal: 20,
+      marginTop: 22,
+      marginBottom: 10,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
+    sectionTitleInline: { color: c.text, fontSize: 18, fontWeight: "800", letterSpacing: -0.2 },
+    sectionAction: { color: c.primary, fontSize: 13, fontWeight: "800" },
+    sectionTitle: {
+      color: c.text,
+      fontSize: 18,
+      fontWeight: "800",
+      paddingHorizontal: 20,
+      marginTop: 22,
+      marginBottom: 10,
+      letterSpacing: -0.2,
+    },
+    excerptBox: {
+      marginHorizontal: 20,
+      paddingHorizontal: 15,
+      paddingVertical: 13,
+      borderRadius: 16,
+      backgroundColor: c.bgCard,
+      borderLeftWidth: 3,
+      borderLeftColor: c.primary,
+      shadowColor: "#000",
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.045,
+      shadowRadius: 12,
+      elevation: 2,
+    },
+    excerptText: {
+      color: c.text,
+      fontSize: 14,
+      lineHeight: 22,
+      fontStyle: "italic",
+      fontFamily: FONT.serif,
+    },
+    authorPhoto: { width: 48, height: 48, borderRadius: 24 },
+    authorName: { color: c.text, fontSize: 15, fontWeight: "800" },
+    authorBio: { color: c.textDim, fontSize: 13, lineHeight: 19 },
+    pubLogo: { width: 44, height: 44, borderRadius: 12 },
+    pubName: { color: c.text, fontSize: 15, fontWeight: "800" },
+    pubAbout: { color: c.textDim, fontSize: 13, lineHeight: 19 },
+    relatedItem: { width: 116, paddingBottom: 4 },
+    relatedCover: {
+      width: 116,
+      height: 166,
+      borderRadius: 10,
+      backgroundColor: c.bgCard,
+      shadowColor: "#000",
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: 0.12,
+      shadowRadius: 12,
+      elevation: 4,
+    },
+    relatedTitle: { color: c.text, fontSize: 13, fontWeight: "800", marginTop: 8 },
+    relatedAuthor: { color: c.textMuted, fontSize: 11, marginTop: 2 },
+    relatedRating: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 },
+    relatedRatingText: { color: c.gold, fontSize: 11, fontWeight: "800" },
+  });
+}

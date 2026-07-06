@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "Adabiyot AI",
+    "name": "AdabiyotX",
     "slug": "xu1w72t9fgl1cjekjo90f",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "rork-app",
+    "scheme": ["rork-app", "adabiyotx"],
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
@@ -15,14 +15,27 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "app.rork.xu1w72t9fgl1cjekjo90f"
+      "bundleIdentifier": "app.rork.xu1w72t9fgl1cjekjo90f",
+      "usesAppleSignIn": true,
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "audio",
+          "audio"
+        ],
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "app.rork.xu1w72t9fgl1cjekjo90f"
+      "package": "app.rork.xu1w72t9fgl1cjekjo90f",
+      "permissions": [
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "android.permission.WAKE_LOCK"
+      ]
     },
     "web": {
       "favicon": "./assets/images/favicon.png"
@@ -36,10 +49,20 @@
       ],
       "expo-font",
       "expo-web-browser",
-      "expo-video"
+      "expo-video",
+      "expo-apple-authentication"
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {
+        "origin": "https://rork.com/"
+      },
+      "eas": {
+        "projectId": "cebe4bd6-9428-4454-9beb-b0fbd2312fd2"
+      }
+    },
+    "owner": "jaxongirman"
   }
 }

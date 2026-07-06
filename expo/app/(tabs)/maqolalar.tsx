@@ -23,14 +23,12 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { FONT, PressableScale, Screen } from "@/components/ui";
-import { palette } from "@/constants/colors";
-import {
-  articles,
-  articleCategories,
-  type Article,
-  type ArticleCategory,
-} from "@/mocks/content";
-import { useApp } from "@/providers/AppProvider";
+import type { AppTheme } from "@/constants/colors";
+import { articleCategories, type ArticleCategory } from "@/mocks/content";
+import { usePublishedArticles } from "@/hooks/useArticleContent";
+import type { DisplayArticle } from "@/lib/articles";
+import { useContentAccessChecker } from "@/hooks/usePayments";
+import { useTheme } from "@/providers/ThemeProvider";
 
 const { width: SCREEN_W } = Dimensions.get("window");
 const FEATURED_H = Math.min(430, Math.round(SCREEN_W * 0.92));
@@ -43,10 +41,13 @@ const SORT_OPTIONS: SortOption[] = ["Yangi", "Mashhur", "Eng ko'p o'qilgan", "En
 
 export default function ArticlesScreen() {
   const insets = useSafeAreaInsets();
-  const { purchasedArticleIds } = useApp();
+  const hasAccess = useContentAccessChecker();
   const [query, setQuery] = useState<string>("");
   const [category, setCategory] = useState<CategoryFilter>("Hammasi");
   const [sort, setSort] = useState<SortOption>("Yangi");
+  const { articles } = usePublishedArticles();
+  const { colors: c } = useTheme();
+  const styles = useMemo(() => createStyles(c), [c]);
 
   const featured = articles[0];
 
@@ -69,7 +70,7 @@ export default function ArticlesScreen() {
       if (sort === "Eng foydali") return b.usefulness - a.usefulness;
       return new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime();
     });
-  }, [category, query, sort]);
+  }, [articles, category, query, sort]);
 
   const openArticle = (id: string) => {
     router.push({ pathname: "/article/[id]", params: { id } });
@@ -88,7 +89,7 @@ export default function ArticlesScreen() {
             <Text style={styles.h1}>Maqolalar</Text>
           </View>
           <View style={styles.headerIcon}>
-            <Star color={palette.primary} size={21} fill={palette.primary} />
+            <Star color={c.primary} size={21} fill={c.primary} />
           </View>
         </View>
 
@@ -97,12 +98,12 @@ export default function ArticlesScreen() {
         </Text>
 
         <View style={styles.searchWrap}>
-          <Search color={palette.textMuted} size={18} />
+          <Search color={c.textMuted} size={18} />
           <TextInput
             value={query}
             onChangeText={setQuery}
             placeholder="Maqola, muallif yoki mavzu..."
-            placeholderTextColor={palette.textMuted}
+            placeholderTextColor={c.textMuted}
             style={styles.searchInput}
             testID="articles-search"
           />
@@ -110,13 +111,14 @@ export default function ArticlesScreen() {
 
         <FeaturedArticle
           article={featured}
-          purchased={purchasedArticleIds.includes(featured.id)}
+          purchased={!featured.requiresPurchase || hasAccess("article", featured.id)}
           onPress={() => openArticle(featured.id)}
+          c={c}
         />
 
         <View style={styles.sectionHead}>
           <View style={styles.sectionTitleRow}>
-            <Filter color={palette.primary} size={17} />
+            <Filter color={c.primary} size={17} />
             <Text style={styles.sectionTitle}>Yo'nalishlar</Text>
           </View>
           <Text style={styles.sectionHint}>{visibleArticles.length} ta maqola</Text>
@@ -133,13 +135,14 @@ export default function ArticlesScreen() {
               label={item}
               active={category === item}
               onPress={() => setCategory(item)}
+              c={c}
             />
           ))}
         </ScrollView>
 
         <View style={styles.sectionHead}>
           <View style={styles.sectionTitleRow}>
-            <ArrowUpDown color={palette.primary} size={17} />
+            <ArrowUpDown color={c.primary} size={17} />
             <Text style={styles.sectionTitle}>Tartiblash</Text>
           </View>
         </View>
@@ -155,6 +158,7 @@ export default function ArticlesScreen() {
               label={item}
               active={sort === item}
               onPress={() => setSort(item)}
+              c={c}
             />
           ))}
         </ScrollView>
@@ -164,8 +168,9 @@ export default function ArticlesScreen() {
             <ArticleCard
               key={article.id}
               article={article}
-              purchased={purchasedArticleIds.includes(article.id)}
+              purchased={!article.requiresPurchase || hasAccess("article", article.id)}
               onPress={() => openArticle(article.id)}
+              c={c}
             />
           ))}
         </View>
@@ -178,44 +183,50 @@ function FeaturedArticle({
   article,
   purchased,
   onPress,
+  c,
 }: {
-  article: Article;
+  article: DisplayArticle;
   purchased: boolean;
   onPress: () => void;
+  c: AppTheme;
 }) {
   return (
-    <PressableScale onPress={onPress} style={styles.featuredWrap} testID={`article-featured-${article.id}`}>
+    <PressableScale onPress={onPress} style={{ height: FEATURED_H, marginHorizontal: 20, marginTop: 20, borderRadius: 22, overflow: "hidden", backgroundColor: c.bgCard, shadowColor: "#000", shadowOpacity: 0.12, shadowRadius: 20, shadowOffset: { width: 0, height: 10 }, elevation: 5 }} testID={`article-featured-${article.id}`}>
       <Image source={{ uri: article.cover }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
       <LinearGradient
         colors={["rgba(10,24,12,0.10)", "rgba(10,24,12,0.82)"]}
         style={StyleSheet.absoluteFillObject}
       />
-      <View style={styles.featuredTop}>
-        <View style={styles.premiumBadge}>
+      <View style={{ padding: 16, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+        <View style={{ height: 31, borderRadius: 999, paddingHorizontal: 11, backgroundColor: "rgba(46,125,50,0.88)", flexDirection: "row", alignItems: "center", gap: 6 }}>
           <TrendingUp color="#fff" size={13} />
-          <Text style={styles.premiumBadgeText}>LONGREAD</Text>
+          <Text style={{ color: "#fff", fontSize: 10, fontWeight: "900", letterSpacing: 1.1 }}>LONGREAD</Text>
         </View>
-        <View style={styles.pricePill}>
-          {purchased ? null : <Lock color={palette.primary} size={12} />}
-          <Text style={styles.pricePillText}>{purchased ? "Sotib olingan" : formatPrice(article.price)}</Text>
+        <View style={{ minHeight: 31, borderRadius: 999, paddingHorizontal: 11, backgroundColor: "rgba(255,255,255,0.92)", flexDirection: "row", alignItems: "center", gap: 5 }}>
+          {purchased ? null : <Lock color={c.primary} size={12} />}
+          <Text style={{ color: c.primary, fontSize: 11, fontWeight: "900" }}>
+            {purchased ? (article.requiresPurchase ? "Sotib olingan" : "Ochiq") : formatPrice(article.price)}
+          </Text>
         </View>
       </View>
-      <View style={styles.featuredBottom}>
-        <Text style={styles.featuredCategory}>{article.category.toUpperCase()}</Text>
-        <Text style={styles.featuredTitle} numberOfLines={3}>
+      <View style={{ marginTop: "auto" as any, padding: 18 }}>
+        <Text style={{ color: "#B7F2B9", fontSize: 10, fontWeight: "900", letterSpacing: 1.3, marginBottom: 8 }}>{article.category.toUpperCase()}</Text>
+        <Text style={{ color: "#fff", fontFamily: FONT.serif, fontSize: 27, lineHeight: 32, fontWeight: "800" }} numberOfLines={3}>
           {article.title}
         </Text>
-        <Text style={styles.featuredDesc} numberOfLines={3}>
+        <Text style={{ color: "rgba(255,255,255,0.84)", fontSize: 13, lineHeight: 19, marginTop: 9, fontWeight: "500" }} numberOfLines={3}>
           {article.description}
         </Text>
-        <View style={styles.featuredMeta}>
-          <View style={styles.metaItem}>
-            <User color="rgba(255,255,255,0.82)" size={14} />
-            <Text style={styles.featuredMetaText}>{article.author}</Text>
-          </View>
-          <View style={styles.metaItem}>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12, marginTop: 14 }}>
+          {article.author ? (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+              <User color="rgba(255,255,255,0.82)" size={14} />
+              <Text style={{ color: "rgba(255,255,255,0.84)", fontSize: 12, fontWeight: "700" }}>{article.author}</Text>
+            </View>
+          ) : null}
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
             <Clock color="rgba(255,255,255,0.82)" size={14} />
-            <Text style={styles.featuredMetaText}>{article.readingTime}</Text>
+            <Text style={{ color: "rgba(255,255,255,0.84)", fontSize: 12, fontWeight: "700" }}>{article.readingTime}</Text>
           </View>
         </View>
       </View>
@@ -227,38 +238,42 @@ function ArticleCard({
   article,
   purchased,
   onPress,
+  c,
 }: {
-  article: Article;
+  article: DisplayArticle;
   purchased: boolean;
   onPress: () => void;
+  c: AppTheme;
 }) {
   return (
-    <PressableScale onPress={onPress} style={styles.articleCard} testID={`article-card-${article.id}`}>
-      <Image source={{ uri: article.cover }} style={styles.cardImage} contentFit="cover" />
-      <View style={styles.cardBody}>
-        <View style={styles.cardTopRow}>
-          <Text style={styles.categoryBadge}>{article.category}</Text>
-          <View style={styles.readTime}>
-            <Clock color={palette.textMuted} size={12} />
-            <Text style={styles.readTimeText}>{article.readingTime}</Text>
+    <PressableScale onPress={onPress} style={{ minHeight: 174, borderRadius: 18, backgroundColor: c.bgCard, borderWidth: 1, borderColor: c.border, flexDirection: "row", overflow: "hidden", shadowColor: "#000", shadowOpacity: 0.07, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 3 }} testID={`article-card-${article.id}`}>
+      <Image source={{ uri: article.cover }} style={{ width: 124, minHeight: 174, backgroundColor: c.bgElevated }} contentFit="cover" />
+      <View style={{ flex: 1, padding: 14 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+          <Text style={{ color: c.primary, fontSize: 10, fontWeight: "900", textTransform: "uppercase", letterSpacing: 0.8 }}>{article.category}</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+            <Clock color={c.textMuted} size={12} />
+            <Text style={{ color: c.textMuted, fontSize: 10, fontWeight: "800" }}>{article.readingTime}</Text>
           </View>
         </View>
-        <Text style={styles.cardTitle} numberOfLines={2}>
+        <Text style={{ color: c.text, fontFamily: FONT.serif, fontSize: 18, lineHeight: 22, fontWeight: "800", marginTop: 9 }} numberOfLines={2}>
           {article.title}
         </Text>
-        <Text style={styles.cardDesc} numberOfLines={3}>
+        <Text style={{ color: c.textDim, fontSize: 12, lineHeight: 18, fontWeight: "500", marginTop: 6 }} numberOfLines={3}>
           {article.description}
         </Text>
-        <View style={styles.cardFooter}>
-          <View style={styles.authorWrap}>
-            <User color={palette.primary} size={13} />
-            <Text style={styles.authorText} numberOfLines={1}>
-              {article.author}
-            </Text>
+        <View style={{ marginTop: "auto" as any, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+          <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 5 }}>
+            {article.author ? (
+              <>
+                <User color={c.primary} size={13} />
+                <Text style={{ flex: 1, color: c.textDim, fontSize: 11, fontWeight: "800" }} numberOfLines={1}>{article.author}</Text>
+              </>
+            ) : null}
           </View>
-          <View style={purchased ? styles.ownedPill : styles.lockedPill}>
-            {purchased ? null : <Lock color={palette.primary} size={11} />}
-            <Text style={purchased ? styles.ownedText : styles.lockedText}>
+          <View style={purchased ? { minHeight: 28, borderRadius: 999, paddingHorizontal: 10, backgroundColor: c.primary, alignItems: "center", justifyContent: "center" } : { minHeight: 28, borderRadius: 999, paddingHorizontal: 9, backgroundColor: c.soft, borderWidth: 1, borderColor: c.borderStrong, flexDirection: "row", alignItems: "center", gap: 4 }}>
+            {purchased ? null : <Lock color={c.primary} size={11} />}
+            <Text style={{ color: purchased ? "#fff" : c.primary, fontSize: 10, fontWeight: "900" }}>
               {purchased ? "Ochiq" : formatPrice(article.price)}
             </Text>
           </View>
@@ -272,14 +287,28 @@ function FilterChip({
   label,
   active,
   onPress,
+  c,
 }: {
   label: string;
   active: boolean;
   onPress: () => void;
+  c: AppTheme;
 }) {
   return (
-    <Pressable onPress={onPress} style={active ? [styles.chip, styles.chipActive] : styles.chip}>
-      <Text style={active ? [styles.chipText, styles.chipTextActive] : styles.chipText}>
+    <Pressable
+      onPress={onPress}
+      style={{
+        minHeight: 36,
+        borderRadius: 999,
+        paddingHorizontal: 14,
+        borderWidth: 1,
+        borderColor: active ? c.primary : c.borderStrong,
+        backgroundColor: active ? c.primary : c.bgCard,
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <Text style={{ color: active ? "#fff" : c.primary, fontSize: 13, fontWeight: "800" }}>
         {label}
       </Text>
     </Pressable>
@@ -287,322 +316,103 @@ function FilterChip({
 }
 
 function formatPrice(value: number): string {
+  if (!value || value <= 0) return "Bepul";
   return `${value.toLocaleString()} so'm`;
 }
 
-const styles = StyleSheet.create({
-  header: {
-    paddingHorizontal: 20,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  kicker: {
-    color: palette.primary,
-    fontSize: 10,
-    fontWeight: "900",
-    letterSpacing: 1.4,
-  },
-  h1: {
-    color: palette.text,
-    fontFamily: FONT.serif,
-    fontSize: 38,
-    lineHeight: 44,
-    fontWeight: "800",
-    letterSpacing: 0,
-    marginTop: 4,
-  },
-  headerIcon: {
-    width: 46,
-    height: 46,
-    borderRadius: 16,
-    backgroundColor: palette.soft,
-    borderWidth: 1,
-    borderColor: palette.borderStrong,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  subtitle: {
-    color: palette.textDim,
-    fontSize: 14,
-    lineHeight: 21,
-    paddingHorizontal: 20,
-    marginTop: 8,
-    fontWeight: "500",
-  },
-  searchWrap: {
-    height: 52,
-    marginHorizontal: 20,
-    marginTop: 18,
-    backgroundColor: palette.bgCard,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: palette.border,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    paddingHorizontal: 15,
-  },
-  searchInput: {
-    flex: 1,
-    color: palette.text,
-    fontSize: 15,
-    fontWeight: "500",
-  },
-  featuredWrap: {
-    height: FEATURED_H,
-    marginHorizontal: 20,
-    marginTop: 20,
-    borderRadius: 22,
-    overflow: "hidden",
-    backgroundColor: palette.bgCard,
-    shadowColor: "#000",
-    shadowOpacity: 0.12,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 5,
-  },
-  featuredTop: {
-    padding: 16,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  premiumBadge: {
-    height: 31,
-    borderRadius: 999,
-    paddingHorizontal: 11,
-    backgroundColor: "rgba(46,125,50,0.88)",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  premiumBadgeText: {
-    color: "#fff",
-    fontSize: 10,
-    fontWeight: "900",
-    letterSpacing: 1.1,
-  },
-  pricePill: {
-    minHeight: 31,
-    borderRadius: 999,
-    paddingHorizontal: 11,
-    backgroundColor: "rgba(255,255,255,0.92)",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-  },
-  pricePillText: {
-    color: palette.primary,
-    fontSize: 11,
-    fontWeight: "900",
-  },
-  featuredBottom: {
-    marginTop: "auto",
-    padding: 18,
-  },
-  featuredCategory: {
-    color: "#B7F2B9",
-    fontSize: 10,
-    fontWeight: "900",
-    letterSpacing: 1.3,
-    marginBottom: 8,
-  },
-  featuredTitle: {
-    color: "#fff",
-    fontFamily: FONT.serif,
-    fontSize: 27,
-    lineHeight: 32,
-    fontWeight: "800",
-    letterSpacing: 0,
-  },
-  featuredDesc: {
-    color: "rgba(255,255,255,0.84)",
-    fontSize: 13,
-    lineHeight: 19,
-    marginTop: 9,
-    fontWeight: "500",
-  },
-  featuredMeta: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 12,
-    marginTop: 14,
-  },
-  metaItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-  },
-  featuredMetaText: {
-    color: "rgba(255,255,255,0.84)",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  sectionHead: {
-    paddingHorizontal: 20,
-    marginTop: 24,
-    marginBottom: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  sectionTitleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 7,
-  },
-  sectionTitle: {
-    color: palette.text,
-    fontFamily: FONT.serif,
-    fontSize: 20,
-    fontWeight: "800",
-    letterSpacing: 0,
-  },
-  sectionHint: {
-    color: palette.primary,
-    fontSize: 11,
-    fontWeight: "900",
-  },
-  chipRow: {
-    paddingHorizontal: 20,
-    gap: 8,
-  },
-  chip: {
-    minHeight: 36,
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    borderWidth: 1,
-    borderColor: palette.borderStrong,
-    backgroundColor: palette.bgCard,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  chipActive: {
-    backgroundColor: palette.primary,
-    borderColor: palette.primary,
-  },
-  chipText: {
-    color: palette.primary,
-    fontSize: 13,
-    fontWeight: "800",
-  },
-  chipTextActive: {
-    color: "#fff",
-  },
-  articleList: {
-    paddingHorizontal: 20,
-    gap: 14,
-    marginTop: 18,
-  },
-  articleCard: {
-    minHeight: 174,
-    borderRadius: 18,
-    backgroundColor: palette.bgCard,
-    borderWidth: 1,
-    borderColor: palette.border,
-    flexDirection: "row",
-    overflow: "hidden",
-    shadowColor: "#000",
-    shadowOpacity: 0.07,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 3,
-  },
-  cardImage: {
-    width: 124,
-    minHeight: 174,
-    backgroundColor: palette.bgElevated,
-  },
-  cardBody: {
-    flex: 1,
-    padding: 14,
-  },
-  cardTopRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 8,
-  },
-  categoryBadge: {
-    color: palette.primary,
-    fontSize: 10,
-    fontWeight: "900",
-    textTransform: "uppercase",
-    letterSpacing: 0.8,
-  },
-  readTime: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-  readTimeText: {
-    color: palette.textMuted,
-    fontSize: 10,
-    fontWeight: "800",
-  },
-  cardTitle: {
-    color: palette.text,
-    fontFamily: FONT.serif,
-    fontSize: 18,
-    lineHeight: 22,
-    fontWeight: "800",
-    letterSpacing: 0,
-    marginTop: 9,
-  },
-  cardDesc: {
-    color: palette.textDim,
-    fontSize: 12,
-    lineHeight: 18,
-    fontWeight: "500",
-    marginTop: 6,
-  },
-  cardFooter: {
-    marginTop: "auto",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 8,
-  },
-  authorWrap: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-  },
-  authorText: {
-    flex: 1,
-    color: palette.textDim,
-    fontSize: 11,
-    fontWeight: "800",
-  },
-  lockedPill: {
-    minHeight: 28,
-    borderRadius: 999,
-    paddingHorizontal: 9,
-    backgroundColor: palette.soft,
-    borderWidth: 1,
-    borderColor: palette.borderStrong,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-  lockedText: {
-    color: palette.primary,
-    fontSize: 10,
-    fontWeight: "900",
-  },
-  ownedPill: {
-    minHeight: 28,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    backgroundColor: palette.primary,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  ownedText: {
-    color: "#fff",
-    fontSize: 10,
-    fontWeight: "900",
-  },
-});
+function createStyles(c: AppTheme) {
+  return StyleSheet.create({
+    header: {
+      paddingHorizontal: 20,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
+    kicker: {
+      color: c.primary,
+      fontSize: 10,
+      fontWeight: "900",
+      letterSpacing: 1.4,
+    },
+    h1: {
+      color: c.text,
+      fontFamily: FONT.serif,
+      fontSize: 38,
+      lineHeight: 44,
+      fontWeight: "800",
+      letterSpacing: 0,
+      marginTop: 4,
+    },
+    headerIcon: {
+      width: 46,
+      height: 46,
+      borderRadius: 16,
+      backgroundColor: c.soft,
+      borderWidth: 1,
+      borderColor: c.borderStrong,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    subtitle: {
+      color: c.textDim,
+      fontSize: 14,
+      lineHeight: 21,
+      paddingHorizontal: 20,
+      marginTop: 8,
+      fontWeight: "500",
+    },
+    searchWrap: {
+      height: 52,
+      marginHorizontal: 20,
+      marginTop: 18,
+      backgroundColor: c.bgCard,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: c.border,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+      paddingHorizontal: 15,
+    },
+    searchInput: {
+      flex: 1,
+      color: c.text,
+      fontSize: 15,
+      fontWeight: "500",
+    },
+    sectionHead: {
+      paddingHorizontal: 20,
+      marginTop: 24,
+      marginBottom: 12,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
+    sectionTitleRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 7,
+    },
+    sectionTitle: {
+      color: c.text,
+      fontFamily: FONT.serif,
+      fontSize: 20,
+      fontWeight: "800",
+      letterSpacing: 0,
+    },
+    sectionHint: {
+      color: c.primary,
+      fontSize: 11,
+      fontWeight: "900",
+    },
+    chipRow: {
+      paddingHorizontal: 20,
+      gap: 8,
+    },
+    articleList: {
+      paddingHorizontal: 20,
+      gap: 14,
+      marginTop: 18,
+    },
+  });
+}

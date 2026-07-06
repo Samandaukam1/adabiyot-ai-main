@@ -488,7 +488,7 @@ export default function PremiumBookReader({
     if (!textToolExcerpt) return;
     try {
       await Share.share({
-        message: `${textToolExcerpt}\n\n${book.title} — ${authorName ?? "Adabiyot AI"}`,
+        message: `${textToolExcerpt}\n\n${book.title} — ${authorName ?? "AdabiyotX"}`,
       });
     } catch {
       // Ignore user-cancelled share actions.
@@ -857,7 +857,7 @@ function ReaderControls({
           </Pressable>
           <View style={styles.controlsTitleWrap}>
             <Text style={[styles.controlsKicker, { color: theme.textMuted }]} numberOfLines={1}>
-              {(authorName ?? "Adabiyot AI").toUpperCase()}
+              {(authorName ?? "AdabiyotX").toUpperCase()}
             </Text>
             <Text style={[styles.controlsTitle, { color: theme.text }]} numberOfLines={1}>
               {title}

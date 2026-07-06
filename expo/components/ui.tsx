@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { palette } from "@/constants/colors";
+import { useTheme } from "@/providers/ThemeProvider";
 
 export const FONT = {
   serif: Platform.select({
@@ -45,7 +46,8 @@ export function Screen({
   children: React.ReactNode;
   style?: ViewStyle;
 }) {
-  return <View style={[{ flex: 1, backgroundColor: palette.bg }, style]}>{children}</View>;
+  const { colors } = useTheme();
+  return <View style={[{ flex: 1, backgroundColor: colors.bg }, style]}>{children}</View>;
 }
 
 export function SectionTitle({
@@ -57,12 +59,13 @@ export function SectionTitle({
   action?: string;
   onAction?: () => void;
 }) {
+  const { colors } = useTheme();
   return (
     <View style={styles.sectionHeader}>
-      <Text style={styles.sectionTitle}>{title}</Text>
+      <Text style={[styles.sectionTitle, { color: colors.text }]}>{title}</Text>
       {action ? (
         <Pressable onPress={onAction} hitSlop={10} testID={`section-${title}`}>
-          <Text style={styles.sectionAction}>{action}</Text>
+          <Text style={[styles.sectionAction, { color: colors.primary }]}>{action}</Text>
         </Pressable>
       ) : null}
     </View>
@@ -116,15 +119,16 @@ export function GlassCard({
   style?: ViewStyle | ViewStyle[];
   intensity?: number;
 }) {
+  const { colors, isDark } = useTheme();
   if (Platform.OS === "web") {
     return (
       <View
         style={[
           {
-            backgroundColor: palette.bgGlass,
+            backgroundColor: colors.bgGlass,
             borderRadius: 20,
             borderWidth: 1,
-            borderColor: palette.border,
+            borderColor: colors.border,
             overflow: "hidden",
           },
           style,
@@ -137,18 +141,20 @@ export function GlassCard({
   return (
     <BlurView
       intensity={intensity}
-      tint="light"
+      tint={isDark ? "dark" : "light"}
       style={[
         {
           borderRadius: 20,
           overflow: "hidden",
           borderWidth: 1,
-          borderColor: palette.border,
+          borderColor: colors.border,
         },
         style,
       ]}
     >
-      <View style={{ backgroundColor: "rgba(255,255,255,0.72)" }}>{children}</View>
+      <View style={{ backgroundColor: isDark ? "rgba(28,33,40,0.72)" : "rgba(255,255,255,0.72)" }}>
+        {children}
+      </View>
     </BlurView>
   );
 }
@@ -168,10 +174,11 @@ export function PrimaryButton({
   style?: ViewStyle;
   testID?: string;
 }) {
-  const bg = variant === "primary" ? palette.primary : "transparent";
+  const { colors } = useTheme();
+  const bg = variant === "primary" ? colors.primary : "transparent";
   const border =
-    variant === "outline" ? palette.primary : variant === "ghost" ? "transparent" : palette.primary;
-  const color = variant === "primary" ? "#fff" : palette.primary;
+    variant === "outline" ? colors.primary : variant === "ghost" ? "transparent" : colors.primary;
+  const color = variant === "primary" ? "#fff" : colors.primary;
   return (
     <PressableScale onPress={onPress} testID={testID} style={[styles.btn, { backgroundColor: bg, borderColor: border }, style ?? {}]}>
       <View style={styles.btnInner}>
@@ -193,20 +200,21 @@ export function Pill({
   onPress?: () => void;
   testID?: string;
 }) {
+  const { colors } = useTheme();
   return (
     <PressableScale onPress={onPress} testID={testID}>
       <View
         style={[
           styles.pill,
           {
-            backgroundColor: active ? palette.primary : palette.bgCard,
-            borderColor: active ? palette.primary : palette.borderStrong,
+            backgroundColor: active ? colors.primary : colors.bgCard,
+            borderColor: active ? colors.primary : colors.borderStrong,
           },
         ]}
       >
         <Text
           style={{
-            color: active ? "#fff" : palette.primary,
+            color: active ? "#fff" : colors.primary,
             fontSize: 13,
             fontWeight: "600",
           }}
@@ -227,8 +235,9 @@ export function CoverImage({
   style?: ViewStyle;
   radius?: number;
 }) {
+  const { colors } = useTheme();
   return (
-    <View style={[{ borderRadius: radius, overflow: "hidden", backgroundColor: palette.bgCard }, style]}>
+    <View style={[{ borderRadius: radius, overflow: "hidden", backgroundColor: colors.bgCard }, style]}>
       <Image
         source={{ uri: source }}
         style={StyleSheet.absoluteFillObject}
@@ -253,13 +262,11 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   sectionTitle: {
-    color: palette.text,
     fontSize: 20,
     fontWeight: "700",
     letterSpacing: -0.3,
   } as TextStyle,
   sectionAction: {
-    color: palette.primary,
     fontSize: 13,
     fontWeight: "600",
   },
