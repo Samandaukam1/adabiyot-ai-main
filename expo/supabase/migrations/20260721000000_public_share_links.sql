@@ -20,7 +20,12 @@
 --    SECURITY DEFINER so an anonymous visitor can resolve a username even when
 --    RLS hides the profile row itself (only id/username/route leave the fn).
 -- ─────────────────────────────────────────────────────────────────────────────
-create or replace function public.resolve_public_share_link(
+-- Dropped first: a `create or replace` can never change the OUT-parameter row
+-- type, so re-running this file over an older resolver would fail with
+-- "cannot change return type of existing function" (42P13).
+drop function if exists public.resolve_public_share_link(text, text);
+
+create function public.resolve_public_share_link(
   p_type text,
   p_key  text
 )
@@ -120,7 +125,10 @@ drop policy if exists share_link_events_select_own on public.share_link_events;
 create policy share_link_events_select_own on public.share_link_events
   for select using (auth.uid() = user_id);
 
-create or replace function public.log_share_link(
+-- Same reason as above — an older signature would block the replace.
+drop function if exists public.log_share_link(text, text, text);
+
+create function public.log_share_link(
   p_type    text,
   p_key     text,
   p_channel text default null
