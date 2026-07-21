@@ -1008,15 +1008,17 @@ export default function StableReaderExperience() {
   }, [selection, resetSelection]);
 
   // When the flip pager is active it owns taps through a real Gesture.Tap that is
-  // exclusive with the pan — so the page Pressable must NOT also handle onPress
-  // (two competing responders is what made controls flaky after a few flips).
+  // exclusive with the pan. A Pressable here must not merely skip `onPress` — it
+  // still claims the RN responder and swallows that gesture, which is what left
+  // the chrome stuck on screen. Under the flip engine we render a plain View.
   const usingFlip = ENABLE_PAGE_FLIP && Platform.OS !== "web" && pages.length > 0;
 
   const renderPage = useCallback(
     ({ item, index }: { item: Page; index: number }) => {
+      const PageBox: any = usingFlip ? View : Pressable;
       if (item.isCover) {
         return (
-          <Pressable
+          <PageBox
             onPress={usingFlip ? undefined : handlePageTap}
             style={[
               styles.page,
@@ -1058,11 +1060,11 @@ export default function StableReaderExperience() {
                 />
               </View>
             </View>
-          </Pressable>
+          </PageBox>
         );
       }
       return (
-      <Pressable
+      <PageBox
         onPress={usingFlip ? undefined : handlePageTap}
         style={[
           styles.page,
@@ -1141,7 +1143,7 @@ export default function StableReaderExperience() {
             </View>
           </View>
         </View>
-      </Pressable>
+      </PageBox>
       );
     },
     [

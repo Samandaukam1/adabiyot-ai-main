@@ -36,6 +36,8 @@ import {
   View,
   ViewToken,
 } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { runOnJS } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { FONT } from "@/components/ui";
 import { palette } from "@/constants/colors";
@@ -1266,6 +1268,23 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
     Animated.timing(uiAnim, { toValue: next ? 1 : 0, duration: 220, useNativeDriver: true }).start();
   }, [uiAnim]);
 
+  // Scroll mode has no flip engine, so one Tap gesture over the whole list owns
+  // the chrome toggle. Scrolling moves the finger far past maxDistance, so this
+  // can never fire on a scroll — and unlike per-block Pressables it also covers
+  // the title page, inter-block gaps and the space below the last block.
+  const scrollTapGesture = useMemo(
+    () =>
+      Gesture.Tap()
+        .maxDuration(600)
+        .maxDistance(24)
+        .shouldCancelWhenOutside(false)
+        .onEnd((_event, success) => {
+          "worklet";
+          if (success) runOnJS(toggleUI)();
+        }),
+    [toggleUI]
+  );
+
   // Page-flip owns clean taps while active. Keeping page Pressables passive in
   // this mode prevents a swipe from also toggling the top/bottom chrome.
   const usingFlip = ENABLE_PAGE_FLIP && Platform.OS !== "web" && pages.length > 0;
@@ -1365,8 +1384,13 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
       // Branding title page (logo · nom · muallif · yil). Same Pressable wrapper
       // as content pages, so tap-to-toggle controls behaves identically.
       if (page.isTitle) {
+        // While the flip engine is active it owns taps via its own RNGH gesture.
+        // A Pressable here — even with `onPress` undefined — still claims the RN
+        // responder and swallows that gesture, which is what stopped the chrome
+        // from toggling. Render a plain View in that mode.
+        const PageBox: any = usingFlip ? View : Pressable;
         return (
-          <Pressable
+          <PageBox
             style={[pgStyles.page, { width: SCREEN_W, backgroundColor: theme.paper, paddingTop: 0, paddingBottom: 0 }]}
             onPress={usingFlip ? undefined : toggleUI}
           >
@@ -1382,7 +1406,7 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
               mutedColor={theme.textMuted}
               accentColor={theme.accent}
             />
-          </Pressable>
+          </PageBox>
         );
       }
       // Bob boshlanayotgan sahifada birinchi paragraph indeksini topamiz (drop cap uchun)
@@ -1391,10 +1415,13 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
         ? page.blocks.findIndex((b) => b.block_type === "paragraph")
         : -1;
 
+      // Same rule as the title page: View under the flip engine, Pressable in the
+      // classic (web / fallback) list where nothing else handles the tap.
+      const PageBox: any = usingFlip ? View : Pressable;
       return (
-        // Pressable: tap → UI yashirish/ko'rsatish | swipe → FlatList ushlab qoladi
+        // tap → UI yashirish/ko'rsatish | swipe → flip/FlatList ushlab qoladi
         // paddingTop/Bottom: barlar ko'rinsin-ko'rinmasin, matn har doim shu oraliqda
-        <Pressable
+        <PageBox
           style={[pgStyles.page, { width: SCREEN_W, backgroundColor: theme.paper, paddingTop: PAGE_TOP, paddingBottom: PAGE_BOT }]}
           onPress={usingFlip ? undefined : toggleUI}
         >
@@ -1482,20 +1509,23 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
           <Text style={[pgStyles.pageNum, { color: theme.textMuted }]}>
             {page.pageIndex + 1}
           </Text>
-        </Pressable>
+        </PageBox>
       );
     },
     [book, fontSize, fontFamily, theme, highlightedAnchorId, PAGE_TOP, PAGE_BOT, brandingLogoUrl, appName, bookYear, toggleUI, usingFlip]
   );
 
   // Uzluksiz scroll rejimi uchun renderItem (blok bazali)
+  // Plain View: the tap is owned by the GestureDetector wrapping the whole
+  // scroll list, so a tap on the title page, on a gap between blocks or below
+  // the last block toggles the chrome exactly like a tap on a paragraph does.
   const renderVertItem = useCallback(
     ({ item }: { item: BookContentBlock }) => (
-      <Pressable style={{ backgroundColor: theme.paper }} onPress={toggleUI}>
+      <View style={{ backgroundColor: theme.paper }}>
         {renderBlock(item, fontSize, fontFamily, theme, highlightedAnchorId === item.anchor_id && !!item.anchor_id)}
-      </Pressable>
+      </View>
     ),
-    [fontSize, fontFamily, theme, highlightedAnchorId, toggleUI]
+    [fontSize, fontFamily, theme, highlightedAnchorId]
   );
 
   const keyExtractorVert = useCallback((item: BookContentBlock) => item.id, []);
@@ -1656,6 +1686,12 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
           }
         />
       ) : (
+        // GestureDetector takes exactly ONE child, and it attaches its own ref to
+        // it — so the child must be a plain host View, not the FlatList (which
+        // already carries scrollVertRef). collapsable={false} guarantees a real
+        // native view exists on Android.
+        <GestureDetector gesture={scrollTapGesture}>
+        <View style={rStyles.fill} collapsable={false}>
         <FlatList
           ref={scrollVertRef}
           data={blocks}
@@ -1686,6 +1722,8 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
           viewabilityConfig={viewabilityConfig}
           showsVerticalScrollIndicator={false}
         />
+        </View>
+        </GestureDetector>
       )}
 
       {/* Top bar — position:absolute, FlatList balandligiga ta'sir qilmaydi */}

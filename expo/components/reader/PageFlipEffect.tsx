@@ -169,11 +169,14 @@ function SmoothCurl({
   const tap = React.useMemo(
     () =>
       Gesture.Tap()
-        // A little forgiving: a real "reveal the controls" tap is often slightly
-        // slower / looser than a strict 260ms·12px. The pan still wins any real
-        // drag (it activates at 8px and is Exclusive), so this can't eat a swipe.
-        .maxDuration(400)
-        .maxDistance(16)
+        // Forgiving on purpose: a "reveal the controls" tap while holding a phone
+        // one-handed is often slower and looser than a strict 260ms·12px, and a
+        // missed toggle feels broken. The pan still wins any real drag (it
+        // activates at 8px and is Exclusive), so this can never eat a swipe.
+        .maxDuration(600)
+        .maxDistance(24)
+        // The finger drifting off the leaf mid-tap must not silently cancel it.
+        .shouldCancelWhenOutside(false)
         .onEnd((_event, success) => {
           "worklet";
           if (success) runOnJS(fireTap)();
