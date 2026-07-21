@@ -39,6 +39,7 @@ import { formatTimecode } from "@/lib/media";
 import { useApp } from "@/providers/AppProvider";
 import { useTheme } from "@/providers/ThemeProvider";
 import { useAuth } from "@/providers/AuthProvider";
+import { useAuthGate } from "@/providers/AuthGateProvider";
 import BuyConfirmSheet from "@/components/payments/BuyConfirmSheet";
 import CardPaymentSheet from "@/components/payments/CardPaymentSheet";
 import PremiumPaywallCard from "@/components/payments/PremiumPaywallCard";
@@ -66,7 +67,8 @@ export default function AudioPlayer() {
   const { book, loading, error } = usePublishedBook(String(id));
   const { savedBookIds, toggleSaveBook } = useApp();
   const { isAuthenticated } = useAuth();
-  const access = useContentAccess("book", book?.id);
+  const { promptLogin } = useAuthGate();
+  const access = useContentAccess("book", book?.id, { isFree: book?.isFree });
   const purchaseFlow = usePurchaseFlow();
   const paymentProductQuery = usePaymentProduct("book", book?.id);
   const paymentProduct = paymentProductQuery.data ?? null;
@@ -214,6 +216,19 @@ export default function AudioPlayer() {
     );
   }
 
+  // Entitlements not resolved yet — show a neutral wait instead of the paywall,
+  // otherwise a listener who already bought the book is told to buy it again.
+  if (access.isLoading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: c.bg, alignItems: "center", justifyContent: "center", padding: 32 }}>
+        <ActivityIndicator color={c.primary} />
+        <Text style={{ color: c.textDim, fontSize: 14, fontWeight: "600", marginTop: 14 }}>
+          Xarid holati tekshirilmoqda…
+        </Text>
+      </View>
+    );
+  }
+
   // Paid audio (part of the book purchase) opens only after backend access.
   const locked = !book.isFree && !access.hasAccess;
   const bookPrice = book.isFree ? 0 : paymentProduct?.amount_uzs ?? book.price;
@@ -235,7 +250,7 @@ export default function AudioPlayer() {
             priceUzs={bookPrice}
             onBuy={() => {
               if (!isAuthenticated) {
-                router.push("/auth");
+                promptLogin();
                 return;
               }
               if (paymentProductQuery.isLoading || paymentProductQuery.isFetching) return;

@@ -6,9 +6,11 @@ import BookCover, { type BookCoverSize } from "@/components/BookCover";
 import { PressableScale } from "@/components/ui";
 import { formatUzs } from "@/constants/tariffs";
 import { useTheme } from "@/providers/ThemeProvider";
+import { openExternalUrl } from "@/utils/safeLinks";
 import {
   contentRoute,
   contentTypeLabel,
+  formatSaleDateTime,
   type AuthorWork,
 } from "@/types/author";
 
@@ -17,6 +19,7 @@ const COVER_ICON: Record<string, React.ComponentProps<typeof BookCover>["placeho
   poem: "feather",
   article: "text-box-outline",
   screenplay: "movie-open-outline",
+  monologue: "microphone-outline",
 };
 
 /**
@@ -29,12 +32,14 @@ export default function AuthorWorkCard({
   width = 150,
   showStats = true,
   coverSize = "medium",
+  authorName,
   onPress,
 }: {
   work: AuthorWork;
   width?: number;
   showStats?: boolean;
   coverSize?: BookCoverSize;
+  authorName?: string | null;
   onPress?: () => void;
 }) {
   const { colors: c, isDark } = useTheme();
@@ -44,9 +49,29 @@ export default function AuthorWorkCard({
   // (a real price or an explicit free flag) — never a misleading "0 so'm".
   const showPrice = work.isFree || work.price > 0;
   const priceLabel = work.isFree ? "Bepul" : formatUzs(work.price);
+  const status = work.status.toLowerCase();
+  const statusMeta =
+    status === "published" || status === "approved" || status === "active"
+      ? { label: "Nashr etilgan", bg: c.primary }
+      : status === "pending" || status === "review"
+        ? { label: "Kutilmoqda", bg: "#D97706" }
+        : status === "rejected"
+          ? { label: "Rad etilgan", bg: "#DC2626" }
+          : { label: "Qoralama", bg: "rgba(17,24,39,0.78)" };
+  const createdLabel = formatSaleDateTime(work.publishedAt ?? work.createdAt).split(",")[0];
   const handlePress =
     onPress ??
-    (() => router.push(contentRoute(work.contentType, work.id) as never));
+    (() => {
+      if (work.contentType === "monologue") {
+        if (work.mediaUrl) {
+          void openExternalUrl(work.mediaUrl);
+        } else {
+          router.push("/(tabs)/reels" as never);
+        }
+        return;
+      }
+      router.push(contentRoute(work.contentType, work.id) as never);
+    });
 
   return (
     <PressableScale onPress={handlePress} style={{ width }}>
@@ -56,20 +81,16 @@ export default function AuthorWorkCard({
         size={coverSize}
         placeholderIcon={COVER_ICON[work.contentType] ?? "book-open-variant"}
       >
-        {!work.isPublished ? (
-          <View style={[styles.statusBadge, styles.draftBadge]}>
-            <Text style={styles.statusText}>Qoralama</Text>
-          </View>
-        ) : work.isFree ? (
-          <View style={[styles.statusBadge, styles.freeBadge]}>
-            <Text style={styles.statusText}>BEPUL</Text>
-          </View>
-        ) : null}
+        <View style={[styles.statusBadge, { backgroundColor: statusMeta.bg }]}>
+          <Text style={styles.statusText}>{statusMeta.label}</Text>
+        </View>
       </BookCover>
 
       <Text numberOfLines={2} style={styles.title}>
         {work.title}
       </Text>
+
+      {authorName ? <Text numberOfLines={1} style={styles.authorName}>{authorName}</Text> : null}
 
       <View style={styles.metaRow}>
         <Text style={styles.type}>{contentTypeLabel(work.contentType)}</Text>
@@ -82,6 +103,8 @@ export default function AuthorWorkCard({
           </>
         ) : null}
       </View>
+
+      {createdLabel ? <Text style={styles.createdAt}>{createdLabel}</Text> : null}
 
       {showStats && (work.salesCount > 0 || work.earnedUzs > 0) ? (
         <View style={styles.statsRow}>
@@ -104,14 +127,14 @@ function createStyles(c: AppTheme, isDark: boolean) {
       paddingVertical: 3,
       borderRadius: 6,
     },
-    freeBadge: { backgroundColor: c.primary },
-    draftBadge: { backgroundColor: "rgba(17,24,39,0.72)" },
     statusText: { color: "#fff", fontSize: 8.5, fontWeight: "800", letterSpacing: 0.6 },
     title: { color: c.text, fontSize: 13, fontWeight: "800", marginTop: 8, lineHeight: 17 },
+    authorName: { color: c.textDim, fontSize: 11, fontWeight: "600", marginTop: 3 },
     metaRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 3 },
     type: { color: c.primary, fontSize: 11, fontWeight: "700" },
     dot: { width: 3, height: 3, borderRadius: 2, backgroundColor: c.textMuted },
     price: { color: c.textDim, fontSize: 11, fontWeight: "700", flexShrink: 1 },
+    createdAt: { color: c.textMuted, fontSize: 10.5, fontWeight: "600", marginTop: 4 },
     statsRow: {
       marginTop: 6,
       alignSelf: "flex-start",

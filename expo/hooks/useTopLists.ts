@@ -12,6 +12,8 @@ export const TOP_LIST_TABS: { key: TopListTab; label: string; view: string }[] =
   { key: "today", label: "Bugun e'lon qilingan", view: "mobile_today_published_materials" },
 ];
 
+const TOP_LIST_LIMIT = 50;
+
 /** Builds demo materials from local mock content so tabs are never empty. */
 function fallbackMaterials(tab: TopListTab): TopMaterial[] {
   const bookMaterials: TopMaterial[] = books.map((b, i) => ({
@@ -68,7 +70,7 @@ export function useTopList(tab: TopListTab): Result {
   const fetchList = useCallback(
     async (isCancelled: () => boolean = () => false) => {
       setLoading(true);
-      const { data, error } = await (supabase as any).from(config.view).select("*");
+      const { data, error } = await (supabase as any).from(config.view).select("*").limit(TOP_LIST_LIMIT);
 
       if (isCancelled()) return;
 

@@ -6,7 +6,6 @@ import {
   Animated,
   Dimensions,
   FlatList,
-  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -18,6 +17,7 @@ import {
 import { FONT, PressableScale } from "@/components/ui";
 import { useBanners } from "@/hooks/useBanners";
 import type { MobileHomeBanner } from "@/types/banner";
+import { openExternalUrl } from "@/utils/safeLinks";
 
 const WIDE_BP       = 700;
 const GRID_GAP      = 14;
@@ -70,7 +70,7 @@ function handleBannerPress(banner: MobileHomeBanner) {
   try {
     const { button_action_type: t, button_link, related_content_id: rid } = banner;
     switch (t) {
-      case "link":       if (button_link) Linking.openURL(button_link).catch(() => {}); break;
+      case "link":       if (button_link) void openExternalUrl(button_link); break;
       case "book":       if (rid) router.push(`/book/${rid}`); break;
       case "article":    if (rid) router.push(`/article/${rid}`); break;
       case "poem":       if (rid) router.push(`/poem/${rid}`); break;

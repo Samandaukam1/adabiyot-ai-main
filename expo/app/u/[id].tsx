@@ -1,7 +1,7 @@
 import { LinearGradient } from "expo-linear-gradient";
 import { Image } from "expo-image";
 import { router, useLocalSearchParams } from "expo-router";
-import { BookOpen, ChevronLeft, Mic, Pencil, Play, Star, UserCheck, UserPlus } from "lucide-react-native";
+import { BookOpen, ChevronLeft, Mic, Pencil, Star, UserCheck, UserPlus } from "lucide-react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import React, { useEffect, useMemo, useState } from "react";
 import { useFollow } from "@/hooks/useFollow";
@@ -12,14 +12,18 @@ import { FONT, PressableScale } from "@/components/ui";
 import VerificationBadge from "@/components/VerificationBadge";
 import VerificationInfoSheet from "@/components/VerificationInfoSheet";
 import AccountTypeLabel from "@/components/AccountTypeLabel";
-import RealisticWorkCard from "@/components/RealisticWorkCard";
+import AuthorWorkCard from "@/components/AuthorWorkCard";
 import ProfileContentTabs, { type ProfileTabKey } from "@/components/ProfileContentTabs";
 import ProfileReelsGrid from "@/components/ProfileReelsGrid";
+import { useAuthorPublicWorks, useAuthorWorks } from "@/hooks/useAuthorAccount";
 import { resolveProfileAvatarUrl } from "@/lib/media";
 import { supabase } from "@/lib/supabase";
-import { books, getAuthor, getBookRoute } from "@/mocks/content";
+import { books, getAuthor } from "@/mocks/content";
+import { useAuth } from "@/providers/AuthProvider";
 import { useProfile } from "@/providers/ProfileProvider";
+import { useAuthGate } from "@/providers/AuthGateProvider";
 import { useTheme } from "@/providers/ThemeProvider";
+import type { AuthorWork } from "@/types/author";
 import {
   getInitials,
   resolveDisplayBadge,
@@ -133,14 +137,44 @@ export default function PublicProfileScreen() {
   const { colors: c, isDark } = useTheme();
   const styles = useMemo(() => createStyles(c, isDark), [c, isDark]);
   const { profile: me } = useProfile();
+  const { userId: currentUserId } = useAuth();
 
   const [profile, setProfile] = useState<PublicProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<ProfileTabKey>("asarlar");
   const { isFollowing, followersCount: liveFollowers, toggleFollow } = useFollow(id);
+  const { promptLogin } = useAuthGate();
   const [badgeInfoOpen, setBadgeInfoOpen] = useState(false);
 
   const isOwn = !!id && id === me.id;
+  const viewedProfileId = id ? String(id) : undefined;
+  const viewedAuthorId = profile?.authorId ?? id;
+  const {
+    works: ownWorks,
+    loading: ownWorksLoading,
+    error: ownWorksError,
+  } = useAuthorWorks();
+  const {
+    works: publicWorks,
+    loading: publicWorksLoading,
+    error: publicWorksError,
+  } = useAuthorPublicWorks(
+    !isOwn ? viewedProfileId : undefined,
+    { enabled: !isOwn && !!viewedProfileId }
+  );
+  const profileWorks = isOwn ? ownWorks : publicWorks;
+  const profileWorksLoading = isOwn ? ownWorksLoading : publicWorksLoading;
+  const profileWorksError = isOwn ? ownWorksError : publicWorksError;
+
+  useEffect(() => {
+    if (!__DEV__) return;
+    console.log("[ProfileWorks] currentUserId:", currentUserId);
+    console.log("[ProfileWorks] viewedProfileId:", viewedProfileId ?? null);
+    console.log("[ProfileWorks] viewedAuthorId:", viewedAuthorId ?? null);
+    console.log("[ProfileWorks] isOwnProfile:", isOwn);
+    console.log("[ProfileWorks] works:", profileWorks);
+    console.log("[ProfileWorks] works error:", profileWorksError);
+  }, [currentUserId, isOwn, profileWorks, profileWorksError, viewedAuthorId, viewedProfileId]);
 
   useEffect(() => {
     if (!id) return;
@@ -196,7 +230,12 @@ export default function PublicProfileScreen() {
     );
   }
 
-  const workBooks = books.filter((b) => profile.workBookIds.includes(b.id));
+  const literaryWorks = profileWorks.filter((work) => work.contentType !== "article" && work.contentType !== "monologue");
+  const articleWorks = profileWorks.filter((work) => work.contentType === "article");
+  const monologueWorks = profileWorks.filter((work) => work.contentType === "monologue");
+  const visibleWorksCount = profileWorksLoading
+    ? profile.worksCount
+    : profileWorks.filter((work) => work.contentType !== "monologue").length;
   const displayBadge = resolveDisplayBadge(profile);
   const badgeType = displayBadge?.type ?? profile.verificationType;
 
@@ -254,7 +293,7 @@ export default function PublicProfileScreen() {
               <PressableScale
                 onPress={async () => {
                   const ok = await toggleFollow();
-                  if (!ok) router.push("/auth");
+                  if (!ok) promptLogin("Obuna bo'lish uchun hisobingizga kiring yoki ro'yxatdan o'ting.");
                 }}
                 style={isFollowing ? styles.followingBtn : styles.followBtn}
               >
@@ -302,12 +341,12 @@ export default function PublicProfileScreen() {
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 12 }}>
           <BadgeCard c={c} gradient={["#FFD700", "#FFA000"]} icon="trophy" title="Faol muallif" subtitle="Adabiyot" />
           <BadgeCard c={c} gradient={["#A855F7", "#7C3AED"]} icon="star-shooting" title="Tan olingan" subtitle="Ijodkor" />
-          <BadgeCard c={c} gradient={["#52B788", "#2D9B6F"]} icon="book-open-variant" title={`${profile.worksCount} asar`} subtitle="Nashr etilgan" />
+          <BadgeCard c={c} gradient={["#52B788", "#2D9B6F"]} icon="book-open-variant" title={`${visibleWorksCount} asar`} subtitle={isOwn ? "Barcha holatlar" : "Nashr etilgan"} />
         </ScrollView>
 
         {/* Stats */}
         <View style={styles.statsRow}>
-          <Stat value={profile.worksCount} label="Asar" c={c} />
+          <Stat value={visibleWorksCount} label="Asar" c={c} />
           <View style={styles.statDivider} />
           <Stat value={profile.readCount} label="O'qildi" c={c} />
           <View style={styles.statDivider} />
@@ -321,29 +360,42 @@ export default function PublicProfileScreen() {
 
         {/* Tab content */}
         {activeTab === "asarlar" ? (
-          workBooks.length > 0 ? (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 16, paddingVertical: 18 }}>
-              {workBooks.map((b) => (
-                <RealisticWorkCard
-                  key={b.id}
-                  title={b.title}
-                  subtitle={getAuthor(b.authorId)?.name}
-                  cover={b.cover}
-                  width={124}
-                  badge={b.free ? "BEPUL" : undefined}
-                  onPress={() => router.push(getBookRoute(b))}
-                />
-              ))}
-            </ScrollView>
-          ) : (
-            <Empty c={c} icon={<BookOpen color={c.textMuted} size={30} strokeWidth={1.5} />} text="Hozircha asar yo'q" />
-          )
+          <ProfileWorksSection
+            works={literaryWorks}
+            loading={profileWorksLoading}
+            error={profileWorksError}
+            authorName={profile.displayName}
+            emptyText={isOwn
+              ? "Hozircha profilingizga biriktirilgan asarlar yo'q."
+              : "Bu muallifning hozircha ommaga ochiq asarlari yo'q."}
+            icon={<BookOpen color={c.textMuted} size={30} strokeWidth={1.5} />}
+            c={c}
+            showStats={isOwn}
+          />
         ) : activeTab === "reels" ? (
-          <ProfileReelsGrid userId={id ?? null} own={isOwn} currentUserId={me.id} />
+          <ProfileReelsGrid userId={id ?? null} own={isOwn} currentUserId={currentUserId} />
         ) : activeTab === "monologlar" ? (
-          <Empty c={c} icon={<Mic color={c.textMuted} size={30} strokeWidth={1.5} />} text="Monologlar hali yo'q" />
+          <ProfileWorksSection
+            works={monologueWorks}
+            loading={profileWorksLoading}
+            error={profileWorksError}
+            authorName={profile.displayName}
+            emptyText={isOwn ? "Monologlaringiz hali yo'q." : "Bu ijodkorning ommaga ochiq monologlari yo'q."}
+            icon={<Mic color={c.textMuted} size={30} strokeWidth={1.5} />}
+            c={c}
+            showStats={isOwn}
+          />
         ) : (
-          <Empty c={c} icon={<Star color={c.textMuted} size={30} strokeWidth={1.5} />} text="Maqolalar hali yo'q" />
+          <ProfileWorksSection
+            works={articleWorks}
+            loading={profileWorksLoading}
+            error={profileWorksError}
+            authorName={profile.displayName}
+            emptyText={isOwn ? "Maqolalaringiz hali yo'q." : "Bu muallifning ommaga ochiq maqolalari yo'q."}
+            icon={<Star color={c.textMuted} size={30} strokeWidth={1.5} />}
+            c={c}
+            showStats={isOwn}
+          />
         )}
       </ScrollView>
 
@@ -354,6 +406,57 @@ export default function PublicProfileScreen() {
         onClose={() => setBadgeInfoOpen(false)}
       />
     </View>
+  );
+}
+
+function ProfileWorksSection({
+  works,
+  loading,
+  error,
+  authorName,
+  emptyText,
+  icon,
+  c,
+  showStats,
+}: {
+  works: AuthorWork[];
+  loading: boolean;
+  error: string | null;
+  authorName: string;
+  emptyText: string;
+  icon: React.ReactNode;
+  c: AppTheme;
+  showStats: boolean;
+}) {
+  if (loading) {
+    return (
+      <View style={{ alignItems: "center", paddingVertical: 42 }}>
+        <ActivityIndicator color={c.primary} />
+      </View>
+    );
+  }
+  if (error) {
+    return <Empty c={c} icon={icon} text={error} />;
+  }
+  if (works.length === 0) {
+    return <Empty c={c} icon={icon} text={emptyText} />;
+  }
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={{ paddingHorizontal: 20, gap: 16, paddingVertical: 18 }}
+    >
+      {works.map((work) => (
+        <AuthorWorkCard
+          key={`${work.contentType}:${work.id}`}
+          work={work}
+          width={128}
+          showStats={showStats}
+          authorName={authorName}
+        />
+      ))}
+    </ScrollView>
   );
 }
 

@@ -34,6 +34,7 @@ import { usePublishedBook } from "@/hooks/usePublishedBooks";
 import { usePublicReels } from "@/hooks/useReels";
 import { useApp } from "@/providers/AppProvider";
 import { useAuth } from "@/providers/AuthProvider";
+import { useAuthGate } from "@/providers/AuthGateProvider";
 import BuyConfirmSheet from "@/components/payments/BuyConfirmSheet";
 import CardPaymentSheet from "@/components/payments/CardPaymentSheet";
 import PromoPriceBlock from "@/components/payments/PromoPriceBlock";
@@ -451,8 +452,9 @@ export default function PoemScreen() {
     () => (mockBook ? getPublisher(mockBook.publisherId) : undefined),
     [mockBook]
   );
-  const { savedBookIds, toggleSaveBook, addHistory } = useApp();
+  const { addHistory } = useApp();
   const { isAuthenticated, userId, refreshProfileRow } = useAuth();
+  const { promptLogin } = useAuthGate();
   const { reels: publicReels } = usePublicReels(userId);
   const [poemFontScale, setPoemFontScale] = useState(1);
   const [infoOpen, setInfoOpen] = useState(false);
@@ -583,7 +585,6 @@ export default function PoemScreen() {
     );
   }
 
-  const saved = savedBookIds.includes(vm.id);
   const purchased = vm.free || access.hasAccess;
   const poemPrice = vm.free ? 0 : paymentProduct?.amount_uzs ?? vm.licenseFee;
   // Paid she'r the user doesn't own → show only ~1/4 of the stanzas as a parcha.
@@ -593,7 +594,7 @@ export default function PoemScreen() {
   const stanzaLocked = !purchased && previewStanzas.length < vm.stanzas.length;
   const openBuy = () => {
     if (!isAuthenticated) {
-      router.push("/auth");
+      promptLogin();
       return;
     }
     if (paymentProductQuery.isLoading || paymentProductQuery.isFetching) return;
@@ -668,7 +669,17 @@ export default function PoemScreen() {
         </View>
 
         <View style={styles.heroWrap}>
-          {vm.authorName ? <Text style={styles.poemAuthor}>{vm.authorName}</Text> : null}
+          {vm.authorName ? (
+            <Text
+              style={styles.poemAuthor}
+              onPress={() => {
+                const target = mockBook?.authorId ?? supaBook?.authorId ?? supaBook?.authorProfileId ?? vm.authorName;
+                if (target) router.push(`/author/${encodeURIComponent(target)}` as never);
+              }}
+            >
+              {vm.authorName}
+            </Text>
+          ) : null}
           <Text style={styles.poemTitle}>{vm.title}</Text>
         </View>
 

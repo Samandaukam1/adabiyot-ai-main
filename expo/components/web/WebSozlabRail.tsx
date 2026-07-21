@@ -25,14 +25,6 @@ interface FeedItem {
 const AUTHOR_COLS =
   "id,display_name,full_name,pen_name,avatar_url,provider_avatar_url,verification_type,account_type,is_creator,is_adib,is_vip";
 
-// Shown only when there are no real posts yet, so the live rail is never empty.
-const SAMPLE: FeedItem[] = [
-  { id: "sample-1", text: "\"Tun yarmida shahar uxlar, faqat men uyg'oqman. Derazadan tushayotgan chiroq nuri xonani oltin rangga bo'yaydi.\"", ts: Date.now() - 8 * 60000, likes: 24, comments: 5, authorName: "Kamola Yusupova", avatarUrl: null, badge: "adib_green" },
-  { id: "sample-2", text: "Kitob o'qish — bu o'zingga qaytish. Har bir sahifa seni birozgina o'zingga yaqinlashtiradi.", ts: Date.now() - 42 * 60000, likes: 58, comments: 12, authorName: "Jasur Mirzayev", avatarUrl: null, badge: "creator_blue" },
-  { id: "sample-3", text: "Kuz kelib, men yana she'r yoza boshladim. Qish — roman, bahor — hikoya, yoz — tanaffus. Kuz esa har doim she'rga to'la.", ts: Date.now() - 3 * 3600000, likes: 91, comments: 20, authorName: "Sardor Rashidov", avatarUrl: null, badge: "creator_adib_gold" },
-  { id: "sample-4", text: "Bolalar adabiyotini past sanash noto'g'ri. Malika Yusupovaning \"Oy Bolasi\" — oddiy va chuqur asar. Kattalar ham o'qisin.", ts: Date.now() - 6 * 3600000, likes: 33, comments: 7, authorName: "Nilufar Rashidova", avatarUrl: null, badge: "none" },
-];
-
 /**
  * A live So'zLab feed rail for the web home. Polls the real `sozlab_posts` table
  * every 15s (near real-time) and joins each author's identity + combined badge
@@ -47,9 +39,12 @@ export default function WebSozlabRail() {
   const load = useCallback(async () => {
     // No strict status filter — the base table is the source of truth so real
     // posts show up regardless of moderation state (matches the mobile feed).
+    // Match the working So'zLab page query: select * (avoids a bad-column error
+    // that a fixed column list can trigger) + status='published'.
     const { data } = await (supabase as any)
       .from("sozlab_posts")
-      .select("id,user_id,body,content,improved_content,created_at,status,is_deleted,likes_count,comments_count")
+      .select("*")
+      .eq("status", "published")
       .order("created_at", { ascending: false })
       .limit(20);
 
@@ -89,13 +84,13 @@ export default function WebSozlabRail() {
       };
     });
 
-    setPosts(mapped.length > 0 ? mapped : SAMPLE);
+    setPosts(mapped);
     setLoading(false);
   }, []);
 
   useEffect(() => {
     load().catch(() => {
-      setPosts(SAMPLE);
+      setPosts([]);
       setLoading(false);
     });
     const timer = setInterval(() => {
@@ -143,6 +138,13 @@ export default function WebSozlabRail() {
       {loading && posts.length === 0 ? (
         <View style={{ paddingVertical: 44, alignItems: "center" }}>
           <ActivityIndicator color={L.primary} />
+        </View>
+      ) : posts.length === 0 ? (
+        <View style={{ paddingVertical: 40, paddingHorizontal: 20, alignItems: "center", gap: 8 }}>
+          <Ionicons name="chatbubble-ellipses-outline" size={26} color={L.textMuted} />
+          <Text style={{ color: L.textMuted, fontSize: 13, textAlign: "center", lineHeight: 19 }}>
+            Hali post yo'q. Birinchi bo'lib fikringizni yozing.
+          </Text>
         </View>
       ) : (
         posts.map((post, i) => <FeedRow key={post.id} post={post} last={i === posts.length - 1} L={L} />)

@@ -11,6 +11,7 @@ import * as WebBrowser from "expo-web-browser";
 import { Alert } from "react-native";
 
 import { supabase } from "@/lib/supabase";
+import type { BookAccessReason } from "@/lib/bookAccess";
 import {
   checkOrder,
   createCard,
@@ -114,7 +115,7 @@ export function createOrderInputFromPaymentProduct(paymentProduct: PaymentProduc
 }
 
 export function logCreateOrderDebug(paymentProduct: PaymentProduct | null | undefined) {
-  console.log("[CREATE_ORDER_DEBUG]", {
+  if (__DEV__) console.log("[CREATE_ORDER_DEBUG]", {
     productId: paymentProduct?.id,
     contentType: paymentProduct?.content_type,
     contentId: paymentProduct?.content_id,
@@ -193,27 +194,45 @@ export function useActiveSubscription(): Entitlement | null {
 
 /**
  * Whether the current user can open a given paid content item. Access is true
- * when there is a matching content unlock OR an active subscription entitlement.
- * Per-content subscription limits are enforced by the backend — the client only
- * reflects what the backend reports.
+ * when the item is free, OR there is a matching content unlock, OR an active
+ * subscription entitlement. Per-content subscription limits are enforced by the
+ * backend — the client only reflects what the backend reports.
+ *
+ * `isLoading` is true while entitlements are still in flight, so callers can show
+ * "Xarid holati tekshirilmoqda…" instead of prematurely offering "Sotib olish"
+ * to someone who already owns the item.
+ *
+ * Pass `{ isFree }` when the caller already knows the catalog flag — it short
+ * circuits to access without waiting on the network.
  */
-export function useContentAccess(contentType: PaymentContentType, contentId: string | null | undefined) {
+export function useContentAccess(
+  contentType: PaymentContentType,
+  contentId: string | null | undefined,
+  opts?: { isFree?: boolean },
+) {
   const { isAuthenticated } = useAuth();
   const query = useMyEntitlements();
   const data = query.data;
+  const isFree = opts?.isFree === true;
 
-  const hasAccess = useMemo(() => {
-    if (!data || !contentId) return false;
+  const reason = useMemo<BookAccessReason>(() => {
+    if (isFree) return "free";
+    if (!data || !contentId) return "not_purchased";
     const unlocked = data.content_unlocks.some(
       (u) => u.content_type === contentType && u.content_id === contentId,
     );
-    if (unlocked) return true;
-    return data.entitlements.some(isSubscriptionEntitlement);
-  }, [data, contentType, contentId]);
+    if (unlocked) return "purchased";
+    if (data.entitlements.some(isSubscriptionEntitlement)) return "access";
+    return "not_purchased";
+  }, [isFree, data, contentType, contentId]);
+
+  // A signed-out user can still read free content; anything else needs a session.
+  const isLoading = !isFree && isAuthenticated && (query.isLoading || query.isPending);
 
   return {
-    hasAccess,
-    isLoading: isAuthenticated && query.isLoading,
+    hasAccess: reason !== "not_purchased",
+    reason,
+    isLoading,
     isAuthenticated,
     refetch: query.refetch,
   };
@@ -312,6 +331,7 @@ async function pollUntilSettled(orderNumber: string, attempts = POLL_ATTEMPTS): 
  */
 export function usePurchaseFlow() {
   const queryClient = useQueryClient();
+  const { userId } = useAuth();
   const [state, setState] = useState<PurchaseState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [smsPhone, setSmsPhone] = useState<string | null>(null);
@@ -326,6 +346,10 @@ export function usePurchaseFlow() {
   const orderRef = useRef<CreateOrderResponse | null>(null);
   const cardTokenRef = useRef<string | null>(null);
   const busy = useRef(false);
+  // Purchase ids whose author royalty we already recorded this session, so a
+  // re-rendered "paid" screen / recheck never double-fires the RPC. The real
+  // duplicate protection lives in SQL (metadata.purchase_id); this is a guard.
+  const recordedRoyaltyRef = useRef<Set<string>>(new Set());
 
   const reset = useCallback(() => {
     cardTokenRef.current = null;
@@ -339,6 +363,55 @@ export function usePurchaseFlow() {
     setErrorMessage(null);
     setState("idle");
   }, []);
+
+  /**
+   * Records the author's 50% royalty for a paid BOOK sale. The client only
+   * sends the real gross (post-discount) amount; SQL computes the 50% and
+   * de-dupes on the purchase id. A failure here must never break the buyer's
+   * purchase, so it is logged and swallowed.
+   */
+  const recordAuthorRoyalty = useCallback(async () => {
+    const order = orderRef.current;
+    const input = lastInput.current;
+    if (!order || !input) return;
+
+    // Narrow the CreateOrderInput union: only single-book product orders qualify
+    // (subscription `plan_key` orders carry no content fields).
+    const contentType = "content_type" in input ? input.content_type : undefined;
+    const bookId = "content_id" in input ? input.content_id : undefined;
+    if (contentType !== "book" || !bookId) return;
+
+    // Prefer a real, stable payment identifier for SQL de-duplication.
+    const purchaseId = order.order_id || order.order_number || order.payme_receipt_id || null;
+    const grossAmount =
+      typeof order.amount_uzs === "number" ? order.amount_uzs : Number(order.amount_uzs ?? 0);
+
+    // Only real, paid book sales are recorded — free books / missing ids skip.
+    if (!bookId || !purchaseId || !userId || !(grossAmount > 0)) return;
+    if (recordedRoyaltyRef.current.has(purchaseId)) return;
+    recordedRoyaltyRef.current.add(purchaseId);
+
+    if (__DEV__) {
+      console.log("[AuthorRoyalty] purchase success", {
+        bookId,
+        buyerId: userId,
+        purchaseId,
+        paidAmount: grossAmount,
+      });
+    }
+
+    try {
+      const { error } = await (supabase as any).rpc("record_author_book_sale", {
+        p_book_id: bookId,
+        p_buyer_id: userId,
+        p_purchase_id: purchaseId,
+        p_gross_amount: grossAmount,
+      });
+      if (error) throw error;
+    } catch (error) {
+      console.error("[AuthorRoyalty] record failed", error);
+    }
+  }, [userId]);
 
   const start = useCallback(async (input: CreateOrderInput, opts?: { promoCode?: string | null }) => {
     if (busy.current) return;
@@ -481,6 +554,7 @@ export function usePurchaseFlow() {
 
       if (status === "paid") {
         cardTokenRef.current = null;
+        await recordAuthorRoyalty();
         // Refresh entitlements + content access + Tokcham purchases.
         await queryClient.invalidateQueries({ queryKey: PAYMENTS_QUERY_KEY });
         setState("paid");
@@ -497,7 +571,7 @@ export function usePurchaseFlow() {
     } finally {
       busy.current = false;
     }
-  }, [queryClient]);
+  }, [queryClient, recordAuthorRoyalty]);
 
   const openCheckout = useCallback(async () => {
     const order = orderRef.current;
@@ -516,6 +590,7 @@ export function usePurchaseFlow() {
       const status = await pollUntilSettled(order.order_number);
       if (status === "paid") {
         cardTokenRef.current = null;
+        await recordAuthorRoyalty();
         await queryClient.invalidateQueries({ queryKey: PAYMENTS_QUERY_KEY });
         setState("paid");
       } else if (status === "pending") {
@@ -531,7 +606,7 @@ export function usePurchaseFlow() {
     } finally {
       busy.current = false;
     }
-  }, [queryClient]);
+  }, [queryClient, recordAuthorRoyalty]);
 
   const recheck = useCallback(async () => {
     const order = orderRef.current;
@@ -544,6 +619,7 @@ export function usePurchaseFlow() {
       const status = await pollUntilSettled(order.order_number);
       if (status === "paid") {
         cardTokenRef.current = null;
+        await recordAuthorRoyalty();
         await queryClient.invalidateQueries({ queryKey: PAYMENTS_QUERY_KEY });
         setState("paid");
       } else if (status === "pending") {
@@ -559,7 +635,7 @@ export function usePurchaseFlow() {
     } finally {
       busy.current = false;
     }
-  }, [queryClient]);
+  }, [queryClient, recordAuthorRoyalty]);
 
   const retry = useCallback(() => {
     if (lastInput.current) void start(lastInput.current, lastOpts.current ?? undefined);

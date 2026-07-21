@@ -88,7 +88,13 @@ export default function BookCover({
         ]}
       >
         {uri ? (
-          <Image source={{ uri }} style={StyleSheet.absoluteFillObject} contentFit={contentFit} />
+          <Image
+            source={{ uri }}
+            style={StyleSheet.absoluteFillObject}
+            contentFit={contentFit}
+            cachePolicy="disk"
+            transition={120}
+          />
         ) : (
           <View style={styles.placeholder}>
             <MaterialCommunityIcons

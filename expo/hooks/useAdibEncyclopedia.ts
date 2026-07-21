@@ -1,121 +1,145 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { mapAdibEntry, type AdibEntry } from "@/types/community";
 
-/** Offline/demo fallback so the encyclopedia is never blank during development. */
-const FALLBACK_ADIBS: AdibEntry[] = [
-  {
-    id: "demo-navoiy",
-    fullName: "Alisher Navoiy",
-    penName: "Navoiy",
-    avatarUrl:
-      "https://upload.wikimedia.org/wikipedia/commons/thumb/2/2a/AlisherNavoi.jpg/440px-AlisherNavoi.jpg",
-    shortDescription: "O'zbek mumtoz adabiyoti asoschisi, shoir va davlat arbobi.",
-    biography:
-      "Nizomiddin Mir Alisher Navoiy 1441-yilda Hirotda tug'ilgan. U turkiy tilda yozilgan g'azal, doston va ilmiy asarlari bilan o'zbek adabiy tilining shakllanishiga ulkan hissa qo'shgan.",
-    education: "Hirot va Mashhad madrasalarida ta'lim olgan.",
-    activity: "Shoir, mutafakkir, tilshunos va Temuriylar davlatining vaziri.",
-    worksSummary: "«Xamsa», «Chor devon», «Mahbub ul-qulub», «Muhokamat ul-lug'atayn».",
-    achievements: "Turkiy tilda «Xamsa» yaratgan birinchi shoir.",
-    quotes: [
-      "Odami ersang demagil odami, Onikim yo'q xalq g'amidin g'ami.",
-      "Kishi bilmas ishin so'rmoqdin uyalma.",
-    ],
-    sources: ["O'zbekiston Milliy ensiklopediyasi"],
-    featured: true,
-    birthYear: "1441",
-  },
-  {
-    id: "demo-cholpon",
-    fullName: "Abdulhamid Cho'lpon",
-    penName: "Cho'lpon",
-    avatarUrl: null,
-    shortDescription: "XX asr o'zbek she'riyatining yorqin namoyandasi.",
-    biography:
-      "Abdulhamid Sulaymon o'g'li Cho'lpon 1897-yilda Andijonda tug'ilgan. Jadidchilik harakatining faol vakili, shoir, dramaturg va tarjimon.",
-    education: "Andijon madrasasida o'qigan.",
-    activity: "Shoir, yozuvchi, dramaturg, tarjimon.",
-    worksSummary: "«Kecha va kunduz» romani, «Buloqlar» she'riy to'plami.",
-    achievements: "O'zbek modern she'riyatining asoschilaridan biri.",
-    quotes: ["Yana oldim sozimni, Kuylayin ozod yurtni."],
-    sources: [],
-    featured: true,
-    birthYear: "1897",
-  },
-  {
-    id: "demo-qodiriy",
-    fullName: "Abdulla Qodiriy",
-    penName: "Julqunboy",
-    avatarUrl: null,
-    shortDescription: "O'zbek romanchiligi asoschisi.",
-    biography:
-      "Abdulla Qodiriy 1894-yilda Toshkentda tug'ilgan. O'zbek nasrining yetuk namoyandasi, «O'tkan kunlar» romani muallifi.",
-    education: "Rus-tuzem maktabi va madrasada tahsil olgan.",
-    activity: "Yozuvchi, jurnalist, satira ustasi.",
-    worksSummary: "«O'tkan kunlar», «Mehrobdan chayon».",
-    achievements: "O'zbek tarixiy romaniga asos solgan.",
-    quotes: ["Tarix — millatning hofizasi."],
-    sources: [],
-    featured: false,
-    birthYear: "1894",
-  },
-];
+type RawRow = Record<string, unknown>;
+const LOAD_ERROR = "Ma’lumotlarni yuklashda xatolik yuz berdi.";
 
-interface Result {
+function rpcRows(data: unknown): RawRow[] {
+  if (Array.isArray(data)) return data.filter((row): row is RawRow => !!row && typeof row === "object");
+  if (!data || typeof data !== "object") return [];
+  const object = data as Record<string, unknown>;
+  for (const key of ["entries", "items", "rows", "data"]) {
+    const value = object[key];
+    if (Array.isArray(value)) {
+      return value.filter((row): row is RawRow => !!row && typeof row === "object");
+    }
+  }
+  return [object];
+}
+
+function mapRows(data: unknown): AdibEntry[] {
+  return rpcRows(data)
+    .map(mapAdibEntry)
+    .filter((entry) => !!entry.id && !!entry.fullName);
+}
+
+interface ListResult {
   adibs: AdibEntry[];
   loading: boolean;
   error: string | null;
-  usingFallback: boolean;
   refetch: () => Promise<void>;
 }
 
-export function useAdibEncyclopedia(): Result {
+/** Published entries only. Search is performed server-side by the public RPC. */
+export function useAdibEncyclopedia(searchQuery = ""): ListResult {
+  const query = searchQuery.trim();
   const [adibs, setAdibs] = useState<AdibEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [usingFallback, setUsingFallback] = useState(false);
+  const requestId = useRef(0);
 
-  const fetchAdibs = useCallback(async (isCancelled: () => boolean = () => false) => {
+  const fetchAdibs = useCallback(async () => {
+    const currentRequest = ++requestId.current;
     setLoading(true);
     setError(null);
 
-    const { data, error: viewErr } = await (supabase as any)
-      .from("mobile_adib_encyclopedia")
-      .select("*");
+    try {
+      const { data, error: rpcError } = await (supabase as any).rpc(
+        "get_published_adib_encyclopedia_entries",
+        { p_query: query }
+      );
+      if (currentRequest !== requestId.current) return;
 
-    if (isCancelled()) return;
+      if (rpcError) {
+        if (__DEV__) console.warn("[AdibEncyclopedia] list RPC error:", rpcError);
+        setAdibs([]);
+        setError(LOAD_ERROR);
+        setLoading(false);
+        return;
+      }
 
-    if (!viewErr && Array.isArray(data) && data.length > 0) {
-      setAdibs(data.map(mapAdibEntry));
-      setUsingFallback(false);
+      setAdibs(mapRows(data));
       setLoading(false);
-      return;
+    } catch (rpcError) {
+      if (currentRequest !== requestId.current) return;
+      if (__DEV__) console.warn("[AdibEncyclopedia] list request failed:", rpcError);
+      setAdibs([]);
+      setError(LOAD_ERROR);
+      setLoading(false);
     }
-
-    // View missing or empty → graceful demo fallback
-    setAdibs(FALLBACK_ADIBS);
-    setUsingFallback(true);
-    setLoading(false);
-  }, []);
+  }, [query]);
 
   useEffect(() => {
-    let cancelled = false;
-    fetchAdibs(() => cancelled);
+    const timer = setTimeout(() => {
+      void fetchAdibs();
+    }, query ? 250 : 0);
     return () => {
-      cancelled = true;
+      clearTimeout(timer);
+      requestId.current += 1;
     };
-  }, [fetchAdibs]);
+  }, [fetchAdibs, query]);
 
-  const refetch = useCallback(() => fetchAdibs(), [fetchAdibs]);
-
-  return { adibs, loading, error, usingFallback, refetch };
+  return { adibs, loading, error, refetch: fetchAdibs };
 }
 
-export function useAdibEntry(id: string | undefined) {
-  const { adibs, loading } = useAdibEncyclopedia();
-  const adib = useMemo(
-    () => (id ? adibs.find((a) => a.id === id) ?? null : null),
-    [adibs, id]
-  );
-  return { adib, loading };
+interface DetailResult {
+  adib: AdibEntry | null;
+  loading: boolean;
+  error: string | null;
+  refetch: () => Promise<void>;
+}
+
+/** One published entry, fetched directly rather than searched in the list. */
+export function useAdibEntry(id: string | undefined): DetailResult {
+  const [adib, setAdib] = useState<AdibEntry | null>(null);
+  const [loading, setLoading] = useState(!!id);
+  const [error, setError] = useState<string | null>(null);
+  const requestId = useRef(0);
+
+  const fetchEntry = useCallback(async () => {
+    if (!id) {
+      setAdib(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+    const currentRequest = ++requestId.current;
+    setLoading(true);
+    setError(null);
+
+    try {
+      const { data, error: rpcError } = await (supabase as any).rpc(
+        "get_public_adib_encyclopedia_entry",
+        { p_id: id }
+      );
+      if (currentRequest !== requestId.current) return;
+
+      if (rpcError) {
+        if (__DEV__) console.warn("[AdibEncyclopedia] detail RPC error:", rpcError);
+        setAdib(null);
+        setError(LOAD_ERROR);
+        setLoading(false);
+        return;
+      }
+
+      setAdib(mapRows(data)[0] ?? null);
+      setLoading(false);
+    } catch (rpcError) {
+      if (currentRequest !== requestId.current) return;
+      if (__DEV__) console.warn("[AdibEncyclopedia] detail request failed:", rpcError);
+      setAdib(null);
+      setError(LOAD_ERROR);
+      setLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    void fetchEntry();
+    return () => {
+      requestId.current += 1;
+    };
+  }, [fetchEntry]);
+
+  return { adib, loading, error, refetch: fetchEntry };
 }

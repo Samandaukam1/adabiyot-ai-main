@@ -2,7 +2,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Image } from "expo-image";
 import { router, useLocalSearchParams } from "expo-router";
 import { ArrowLeft, BadgeCheck, BookOpen, ChevronRight } from "lucide-react-native";
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
@@ -21,18 +21,61 @@ import {
 } from "@/hooks/useAuthorAccount";
 import { getInitials } from "@/types/profile";
 import { useTheme } from "@/providers/ThemeProvider";
+import { useAuth } from "@/providers/AuthProvider";
 
 const CARD_WIDTH = (Dimensions.get("window").width - 28 - 24) / 2;
+type WorkFilter = "all" | "book" | "article" | "screenplay" | "poem" | "monologue";
+const WORK_FILTERS: { key: WorkFilter; label: string }[] = [
+  { key: "all", label: "Barchasi" },
+  { key: "book", label: "Kitoblar" },
+  { key: "article", label: "Maqolalar" },
+  { key: "screenplay", label: "Ssenariylar" },
+  { key: "poem", label: "She'rlar" },
+  { key: "monologue", label: "Monologlar" },
+];
 
 export default function PublicAuthorScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const authorId = id ? String(id) : undefined;
+  const viewedProfileIdOrAuthorId = id ? String(id) : undefined;
   const insets = useSafeAreaInsets();
   const { colors: c, isDark } = useTheme();
+  const { userId: currentUserId } = useAuth();
   const styles = useMemo(() => createStyles(c, isDark), [c, isDark]);
+  const [filter, setFilter] = useState<WorkFilter>("all");
 
-  const { author, loading } = useAuthorPublicProfile(authorId);
-  const { works, loading: worksLoading } = useAuthorPublicWorks(authorId);
+  const { author, loading } = useAuthorPublicProfile(viewedProfileIdOrAuthorId);
+  const {
+    works,
+    loading: worksLoading,
+    error: publicWorksError,
+  } = useAuthorPublicWorks(viewedProfileIdOrAuthorId);
+  const viewedProfileId = author?.linkedProfileId ?? viewedProfileIdOrAuthorId;
+  const viewedAuthorId = author?.id ?? viewedProfileIdOrAuthorId;
+  const isOwnProfile = !!currentUserId && (
+    viewedProfileId === currentUserId || author?.linkedAccountId === currentUserId
+  );
+  useEffect(() => {
+    if (!__DEV__) return;
+    console.log("[ProfileWorks] currentUserId:", currentUserId);
+    console.log("[ProfileWorks] viewedProfileId:", viewedProfileId ?? null);
+    console.log("[ProfileWorks] viewedAuthorId:", viewedAuthorId ?? null);
+    console.log("[ProfileWorks] isOwnProfile:", isOwnProfile);
+    console.log("[ProfileWorks] works:", works);
+    console.log("[ProfileWorks] works error:", publicWorksError);
+  }, [currentUserId, isOwnProfile, publicWorksError, viewedAuthorId, viewedProfileId, works]);
+  useEffect(() => {
+    if (isOwnProfile) {
+      router.replace("/(tabs)/profile" as never);
+    }
+  }, [isOwnProfile]);
+  const filteredWorks = useMemo(
+    () => works.filter((work) => {
+      if (filter === "all") return true;
+      if (filter === "screenplay") return work.contentType === "screenplay" || work.contentType === "scenario";
+      return work.contentType === filter;
+    }),
+    [filter, works]
+  );
 
   if (loading) {
     return (
@@ -108,6 +151,7 @@ export default function PublicAuthorScreen() {
                 <BadgeCheck color={c.primary} size={22} fill={c.primary} strokeWidth={0} />
               ) : null}
             </View>
+            {author.username ? <Text style={styles.username}>@{author.username}</Text> : null}
             {author.profession ? (
               <Text style={styles.role}>{author.profession}</Text>
             ) : null}
@@ -117,7 +161,7 @@ export default function PublicAuthorScreen() {
 
             {author.encyclopediaEntryId ? (
               <PressableScale
-                onPress={() => router.push(`/adiblar/${author.encyclopediaEntryId}` as never)}
+                onPress={() => router.push(`/adib-encyclopedia/${author.encyclopediaEntryId}` as never)}
                 style={styles.encCta}
               >
                 <BookOpen color={c.primary} size={16} strokeWidth={2.2} />
@@ -143,19 +187,41 @@ export default function PublicAuthorScreen() {
 
         {/* ─── ASARLAR ───────────────────────────────────────────── */}
         <Text style={styles.sectionTitle}>Asarlari</Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterRow}
+        >
+          {WORK_FILTERS.map((item) => {
+            const active = item.key === filter;
+            return (
+              <PressableScale
+                key={item.key}
+                onPress={() => setFilter(item.key)}
+                style={active ? [styles.filterChip, styles.filterChipActive] : styles.filterChip}
+              >
+                <Text style={[styles.filterText, active && styles.filterTextActive]}>{item.label}</Text>
+              </PressableScale>
+            );
+          })}
+        </ScrollView>
         {worksLoading ? (
           <View style={styles.center}>
             <ActivityIndicator color={c.primary} />
           </View>
         ) : works.length === 0 ? (
           <View style={styles.emptyWrap}>
-            <Text style={styles.emptyText}>Bu muallifga hali asarlar biriktirilmagan.</Text>
+            <Text style={styles.emptyText}>Bu muallifning hozircha ommaga ochiq asarlari yo'q.</Text>
+          </View>
+        ) : filteredWorks.length === 0 ? (
+          <View style={styles.emptyWrap}>
+            <Text style={styles.emptyText}>Bu bo'limda ommaga ochiq asarlar yo'q.</Text>
           </View>
         ) : (
           <View style={styles.grid}>
-            {works.map((w) => (
+            {filteredWorks.map((w) => (
               <View key={`${w.contentType}:${w.id}`} style={styles.gridCell}>
-                <AuthorWorkCard work={w} width={CARD_WIDTH} showStats={false} />
+                <AuthorWorkCard work={w} width={CARD_WIDTH} showStats={false} authorName={author.fullName} />
               </View>
             ))}
           </View>
@@ -217,6 +283,7 @@ function createStyles(c: AppTheme, isDark: boolean) {
       textAlign: "center",
     },
     role: { color: c.primary, fontSize: 13.5, fontWeight: "700", marginTop: 6 },
+    username: { color: c.textDim, fontSize: 13, fontWeight: "700", marginTop: 5 },
     shortDesc: {
       color: c.textDim,
       fontSize: 13.5,
@@ -248,6 +315,20 @@ function createStyles(c: AppTheme, isDark: boolean) {
       marginTop: 26,
       marginBottom: 12,
     },
+    filterRow: { paddingHorizontal: 20, gap: 8, paddingBottom: 4 },
+    filterChip: {
+      height: 34,
+      paddingHorizontal: 14,
+      borderRadius: 17,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.bgCard,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    filterChipActive: { backgroundColor: c.primary, borderColor: c.primary },
+    filterText: { color: c.textDim, fontSize: 12, fontWeight: "700" },
+    filterTextActive: { color: "#fff" },
     bioBox: {
       marginHorizontal: 20,
       padding: 18,

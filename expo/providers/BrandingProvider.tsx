@@ -37,7 +37,17 @@ interface BrandingContextValue {
   refreshBranding: () => Promise<void>;
 }
 
-const defaultFaviconHref = RNImage.resolveAssetSource(DEFAULT_FAVICON)?.uri ?? null;
+// `resolveAssetSource` can be missing/throw on web (Vercel) — guard it so the
+// whole app never white-screens just to resolve a favicon.
+const defaultFaviconHref = (() => {
+  try {
+    const resolver = (RNImage as any)?.resolveAssetSource;
+    if (typeof resolver !== "function") return Platform.OS === "web" ? "/favicon.png" : null;
+    return resolver(DEFAULT_FAVICON)?.uri ?? (Platform.OS === "web" ? "/favicon.png" : null);
+  } catch {
+    return Platform.OS === "web" ? "/favicon.png" : null;
+  }
+})();
 
 const DEFAULT_BRANDING: BrandingSettings = {
   app_name: DEFAULT_APP_NAME,

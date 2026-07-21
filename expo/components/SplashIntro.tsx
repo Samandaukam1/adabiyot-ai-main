@@ -310,9 +310,12 @@ export default function SplashIntro({ config, onFinish, onShown }: SplashIntroPr
           />
         </Animated.View>
       ) : null}
+      {/* Buffering placeholder. Uses the bare bundled mark (no coloured badge,
+          no remote fetch) so it reads as the same logo the launch screen just
+          showed, rather than a third, different one. */}
       {!ready ? (
         <View pointerEvents="none" style={styles.brandLoading}>
-          <BrandLogo variant="splash" size={92} radius={26} />
+          <BrandLogo variant="splash" size={140} plain bundledOnly />
         </View>
       ) : null}
       <View pointerEvents="none" style={styles.vignette} />

@@ -13,7 +13,6 @@ import {
   TextStyle,
 } from "react-native";
 import * as Haptics from "expo-haptics";
-import { palette } from "@/constants/colors";
 import { useTheme } from "@/providers/ThemeProvider";
 
 export const FONT = {
@@ -242,6 +241,7 @@ export function CoverImage({
         source={{ uri: source }}
         style={StyleSheet.absoluteFillObject}
         contentFit="cover"
+        cachePolicy="disk"
         transition={250}
       />
       <LinearGradient

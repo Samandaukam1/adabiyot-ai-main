@@ -22,6 +22,7 @@ import WebBookCover from "./WebBookCover";
 import WebBookGrid, { WebBookGridSkeleton } from "./WebBookGrid";
 import WebContainer from "./WebContainer";
 import WebFooter from "./WebFooter";
+import AdibEncyclopediaSection from "@/components/AdibEncyclopediaSection";
 import { cursorPointer, hoverTransition, softShadow } from "./webStyle";
 
 const GAP = 24;
@@ -125,8 +126,8 @@ export default function WebTokcha() {
 
   useEffect(() => {
     if (!isArticles) return;
-    console.log("[WebArticles] fetching...");
-    console.log("[WebArticles] count:", realArticles.length);
+    if (__DEV__) console.log("[WebArticles] fetching...");
+    if (__DEV__) console.log("[WebArticles] count:", realArticles.length);
   }, [isArticles, realArticles.length]);
 
   const shelfItems = useMemo(() => {
@@ -162,6 +163,8 @@ export default function WebTokcha() {
             </Text>
             <Text style={{ color: L.textDim, fontSize: 16, marginTop: 8 }}>Kutubxonangiz va butun adabiyot to'plami</Text>
           </View>
+
+          <AdibEncyclopediaSection />
 
           <View style={{ flexDirection: "row", gap: 36 }}>
             {/* Sidebar */}

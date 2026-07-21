@@ -4,6 +4,8 @@ import { parseTimecodeText, resolveMediaUrl } from "@/lib/media";
 import type { MobileBookAudioFile, MobileBookAudioTocItem } from "@/types/database";
 
 const AUDIO_BUCKET = "book-audios";
+const BOOK_AUDIO_FILES_LIMIT = 8;
+const BOOK_AUDIO_TOC_LIMIT = 300;
 
 export interface AudioTocItem {
   id: string;
@@ -57,13 +59,15 @@ async function fetchAudioFiles(bookId: string): Promise<MobileBookAudioFile[]> {
   const view = await (supabase as any)
     .from("mobile_book_audio_files")
     .select("*")
-    .eq("book_id", bookId);
+    .eq("book_id", bookId)
+    .limit(BOOK_AUDIO_FILES_LIMIT);
   if (!view.error) return (view.data as MobileBookAudioFile[]) ?? [];
 
   const base = await (supabase as any)
     .from("book_audio_files")
     .select("*")
-    .eq("book_id", bookId);
+    .eq("book_id", bookId)
+    .limit(BOOK_AUDIO_FILES_LIMIT);
   if (!base.error) {
     return ((base.data as MobileBookAudioFile[] | null) ?? []).filter(
       (r) => (r as { is_active?: boolean }).is_active !== false
@@ -84,14 +88,16 @@ async function fetchAudioToc(bookId: string): Promise<MobileBookAudioTocItem[]> 
     .from("mobile_book_audio_toc_items")
     .select("*")
     .eq("book_id", bookId)
-    .order("sort_order", { ascending: true });
+    .order("sort_order", { ascending: true })
+    .limit(BOOK_AUDIO_TOC_LIMIT);
   if (!view.error) return (view.data as MobileBookAudioTocItem[]) ?? [];
 
   const base = await (supabase as any)
     .from("book_audio_toc_items")
     .select("*")
     .eq("book_id", bookId)
-    .order("sort_order", { ascending: true });
+    .order("sort_order", { ascending: true })
+    .limit(BOOK_AUDIO_TOC_LIMIT);
   if (!base.error) {
     return ((base.data as MobileBookAudioTocItem[] | null) ?? []).filter(
       (r) => (r as { is_active?: boolean }).is_active !== false

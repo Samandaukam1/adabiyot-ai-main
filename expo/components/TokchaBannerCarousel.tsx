@@ -4,17 +4,15 @@ import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "
 import {
   Animated,
   FlatList,
-  Linking,
   Platform,
   Pressable,
   StyleSheet,
   useWindowDimensions,
   View,
 } from "react-native";
-import AnimatedGlowCard from "@/components/AnimatedGlowCard";
-import { palette } from "@/constants/colors";
 import { useTokchaBanners } from "@/hooks/useTokchaBanners";
 import type { MobileTokchaBanner } from "@/types/banner";
+import { isSafeExternalUrl, isSafeInternalRoute, openExternalUrl } from "@/utils/safeLinks";
 
 const PAGE_PADDING = 20;
 const AUTO_SLIDE_MS = 4000;
@@ -26,69 +24,32 @@ function normalizeTarget(value: string | null | undefined): string | null {
   return target ? target : null;
 }
 
-function getCategoryTarget(banner: MobileTokchaBanner): string | null {
-  return (
-    normalizeTarget(banner.related_content_id) ??
-    normalizeTarget(banner.related_content_type) ??
-    normalizeTarget(banner.button_link)
-  );
+function getAnchorLink(banner: MobileTokchaBanner): string | null {
+  return normalizeTarget(banner.anchor_link);
 }
 
-function handleBannerPress(
-  banner: MobileTokchaBanner,
-  onCategoryPress?: (category: string) => void
-) {
-  const action = banner.button_action_type ?? "none";
-  const relatedId = normalizeTarget(banner.related_content_id);
+function canPressBanner(banner: MobileTokchaBanner): boolean {
+  const anchor = getAnchorLink(banner);
+  return isSafeInternalRoute(anchor) || isSafeExternalUrl(anchor);
+}
 
-  try {
-    switch (action) {
-      case "none":
-        return;
-      case "link":
-        if (banner.button_link) {
-          Linking.openURL(banner.button_link).catch(() => {});
-        }
-        return;
-      case "book":
-        if (relatedId) router.push(`/book/${relatedId}`);
-        return;
-      case "article":
-        if (relatedId) router.push({ pathname: "/article/[id]", params: { id: relatedId } });
-        return;
-      case "poem":
-        if (relatedId) router.push(`/poem/${relatedId}`);
-        return;
-      case "screenplay":
-        if (relatedId) router.push(`/screenplay/${relatedId}`);
-        return;
-      case "reel":
-        router.push({
-          pathname: "/(tabs)/reels",
-          params: relatedId ? { reelId: relatedId } : undefined,
-        });
-        return;
-      case "author":
-        if (relatedId) router.push(`/author/${relatedId}`);
-        return;
-      case "publisher":
-        if (relatedId) router.push(`/publisher/${relatedId}`);
-        return;
-      case "category": {
-        const target = getCategoryTarget(banner);
-        if (target) onCategoryPress?.(target);
-        return;
-      }
-      case "tokcha": {
-        const target = getCategoryTarget(banner);
-        if (target) onCategoryPress?.(target);
-        return;
-      }
-      default:
-        return;
+function handleBannerPress(banner: MobileTokchaBanner) {
+  const anchor = getAnchorLink(banner);
+  if (!anchor) return;
+
+  // Internal Expo Router path → navigate in-app; external https → open browser.
+  // Anything else (javascript:, data:, protocol-relative, bare text) is ignored.
+  if (isSafeInternalRoute(anchor)) {
+    try {
+      router.push(anchor as any);
+    } catch {
+      // Ignore malformed routes rather than crashing the home screen.
     }
-  } catch {
     return;
+  }
+
+  if (isSafeExternalUrl(anchor)) {
+    void openExternalUrl(anchor);
   }
 }
 
@@ -96,39 +57,29 @@ const BannerCard = memo(function BannerCard({
   item,
   width,
   height,
-  onCategoryPress,
 }: {
   item: MobileTokchaBanner;
   width: number;
   height: number;
-  onCategoryPress?: (category: string) => void;
 }) {
   const imageUrl = normalizeTarget(item.image_url);
   if (!imageUrl) return null;
 
-  const glowEnabled = item.enable_glow ?? true;
+  const isPressable = canPressBanner(item);
 
   return (
     <Pressable
-      accessibilityRole="button"
-      onPress={() => handleBannerPress(item, onCategoryPress)}
+      accessibilityRole={isPressable ? "button" : undefined}
+      disabled={!isPressable}
+      onPress={isPressable ? () => handleBannerPress(item) : undefined}
       style={[styles.cardPressable, { width, height }]}
     >
-      <AnimatedGlowCard
-        width={width}
-        height={height}
-        borderRadius={BANNER_RADIUS}
-        enabled={glowEnabled}
-        primaryColor={item.glow_primary_color}
-        secondaryColor={item.glow_secondary_color}
-      >
-        <Image
-          source={{ uri: imageUrl }}
-          style={styles.bannerImage}
-          contentFit="cover"
-          transition={220}
-        />
-      </AnimatedGlowCard>
+      <Image
+        source={{ uri: imageUrl }}
+        style={styles.bannerImage}
+        contentFit="cover"
+        transition={220}
+      />
     </Pressable>
   );
 });
@@ -194,6 +145,8 @@ export default function TokchaBannerCarousel({
 }: {
   onCategoryPress?: (category: string) => void;
 }) {
+  void onCategoryPress;
+
   const { width: screenWidth } = useWindowDimensions();
   const { banners, loading } = useTokchaBanners();
   const [activeIndex, setActiveIndex] = useState(0);
@@ -205,7 +158,7 @@ export default function TokchaBannerCarousel({
   const cardHeight = cardWidth / 4;
 
   const displayBanners = useMemo(
-    () => banners.filter((banner) => !!normalizeTarget(banner.image_url)).slice(0, 7),
+    () => banners.filter((banner) => !!normalizeTarget(banner.image_url)),
     [banners]
   );
 
@@ -270,10 +223,9 @@ export default function TokchaBannerCarousel({
         item={item}
         width={cardWidth}
         height={cardHeight}
-        onCategoryPress={onCategoryPress}
       />
     </View>
-  ), [cardHeight, cardWidth, onCategoryPress, screenWidth]);
+  ), [cardHeight, cardWidth, screenWidth]);
 
   const keyExtractor = useCallback(
     (item: MobileTokchaBanner, index: number) => item.id || `tokcha-banner-${index}`,
@@ -348,11 +300,12 @@ const styles = StyleSheet.create({
   },
   cardPressable: {
     borderRadius: BANNER_RADIUS,
+    overflow: "hidden",
   },
   bannerImage: {
     width: "100%",
     height: "100%",
-    backgroundColor: palette.soft,
+    backgroundColor: "transparent",
   },
   skeleton: {
     marginHorizontal: PAGE_PADDING,

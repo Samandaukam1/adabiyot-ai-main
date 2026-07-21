@@ -43,7 +43,7 @@ export const PAYMENTS_API_URL = (
 
 if (__DEV__) {
   // Safe: only the base URL — no tokens/keys.
-  console.log("[PAYMENTS_API_URL]", PAYMENTS_API_URL);
+  if (__DEV__) console.log("[PAYMENTS_API_URL]", PAYMENTS_API_URL);
 }
 
 /**
@@ -68,7 +68,7 @@ async function getSessionToken(): Promise<string | null> {
 
   const token = session?.access_token ?? null;
   if (__DEV__) {
-    console.log("[PAYMENT_AUTH]", { hasSession: !!session, hasAccessToken: !!token });
+    if (__DEV__) console.log("[PAYMENT_AUTH]", { hasSession: !!session, hasAccessToken: !!token });
   }
   return token;
 }
@@ -174,7 +174,7 @@ export async function createOrder(input: CreateOrderBody): Promise<CreateOrderRe
 
   // Diagnostic (safe: response body carries order/receipt ids only — never the
   // card number, token, SMS code, or access token, which are sent elsewhere).
-  console.log("[CREATE_ORDER_RESPONSE_DEBUG]", {
+  if (__DEV__) console.log("[CREATE_ORDER_RESPONSE_DEBUG]", {
     status: result.status,
     ok: result.ok,
     body: result.json,

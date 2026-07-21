@@ -28,7 +28,6 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { FONT, PressableScale } from "@/components/ui";
-import BrandLogo from "@/components/BrandLogo";
 import {
   AnimatedPressable,
   FadeSlideIn,
@@ -40,12 +39,17 @@ import {
 } from "@/components/animations";
 import { PullRefreshIndicator } from "@/components/PullRefreshIndicator";
 import ExploreShortcutButtons from "@/components/ExploreShortcutButtons";
+import TaxonomyShortcutButtons from "@/components/TaxonomyShortcutButtons";
 import ArticleHomeCard from "@/components/ArticleHomeCard";
+import HomeHeroAdCard from "@/components/HomeHeroAdCard";
 import BookCover from "@/components/BookCover";
 import { usePullToRefresh } from "@/hooks/usePullToRefresh";
 import { usePublishedBooks } from "@/hooks/usePublishedBooks";
+import { useContentCategories, useContentGenres } from "@/hooks/useTaxonomy";
+import { bookMatchesCategory, bookMatchesGenre } from "@/lib/taxonomy";
 import { useHomeArticleCards } from "@/hooks/useArticleContent";
 import { useUnreadNotificationCount } from "@/hooks/useNotifications";
+import { useHomeHeroAd } from "@/hooks/useHomeHeroAd";
 import { useProfile } from "@/providers/ProfileProvider";
 import { useTheme } from "@/providers/ThemeProvider";
 import { useBranding } from "@/providers/BrandingProvider";
@@ -65,35 +69,36 @@ const GRID_GAP = 16;
 const GRID_CELL = (SW - GRID_PAD * 2 - GRID_GAP * 1.5) / 2.5;
 const GRID_IMG_H = Math.floor(GRID_CELL * 1.46);
 
-const GENRE_CATS = ["Hammasi", "She'r", "Roman", "Hikoya", "Ssenariy", "Qissa", "Maqola", "Qo'llanma", "Darslik", "Ertak"] as const;
-const THEME_CATS = ["Hayotiy", "Fantastik", "Falsafiy", "Psixologik", "Ilmiy", "Biografik", "Bolalar"] as const;
+// Chips are built from the LIVE taxonomy (public.content_genres /
+// public.content_categories) — the same rows the admin panel tags books with.
+// The only hardcoded entry is the "Hammasi" reset chip.
+const ALL_CHIP = "Hammasi";
 
-type GenreCat = typeof GENRE_CATS[number];
-type ThemeCat = typeof THEME_CATS[number];
-type Cat = GenreCat | ThemeCat;
+type Cat = string;
 
-const GENRE_ICONS: Record<GenreCat, string> = {
+/** Icon per taxonomy name; anything unlisted falls back to a neutral glyph. */
+const TAXONOMY_ICONS: Record<string, string> = {
   Hammasi: "view-grid",
-  "She'r": "feather",
-  Roman: "book-open-page-variant",
-  Hikoya: "book-open-variant",
-  Ssenariy: "movie-open-outline",
-  Qissa: "script-text-outline",
-  Maqola: "newspaper-variant-outline",
-  "Qo'llanma": "book-education-outline",
-  Darslik: "school-outline",
-  Ertak: "magic-staff",
-};
-
-const THEME_ICONS: Record<ThemeCat, string> = {
+  // Janrlar (content_genres)
   Hayotiy: "heart-outline",
   Fantastik: "rocket-launch-outline",
   Falsafiy: "brain",
   Psixologik: "emoticon-outline",
   Ilmiy: "flask-outline",
   Biografik: "account-outline",
-  Bolalar: "baby-face-outline",
+  Romantik: "heart-multiple-outline",
+  // Kategoriyalar (content_categories, content_group = 'book')
+  Roman: "book-open-page-variant",
+  Hikoya: "book-open-variant",
+  Qissa: "script-text-outline",
+  "Qo‘llanma": "book-education-outline",
+  "To‘plam": "bookshelf",
+  "She’riy to‘plam": "feather",
+  Darslik: "school-outline",
+  Ertak: "magic-staff",
 };
+
+const DEFAULT_CHIP_ICON = "book-outline";
 
 const CATEGORY_ICON_COLORS: Record<string, string> = {
   Hammasi: "#52B788",
@@ -112,18 +117,19 @@ const CATEGORY_ICON_COLORS: Record<string, string> = {
   Psixologik: "#F59E0B",
   Ilmiy: "#10B981",
   Biografik: "#6366F1",
-  Bolalar: "#F43F5E",
+  Romantik: "#F43F5E",
+  "Qo‘llanma": "#EAB308",
+  "To‘plam": "#0EA5E9",
+  "She’riy to‘plam": "#D946EF",
 };
 
 // ─── Chip ─────────────────────────────────────────────────────────────────────
 const ChipRow = memo(function ChipRow({
   cats,
-  icons,
   active,
   onSelect,
 }: {
   cats: readonly string[];
-  icons: Record<string, string>;
   active: Cat;
   onSelect: (c: Cat) => void;
 }) {
@@ -136,7 +142,7 @@ const ChipRow = memo(function ChipRow({
     >
       {cats.map((c) => {
         const isActive = active === c;
-        const iconName = icons[c];
+        const iconName = TAXONOMY_ICONS[c] ?? DEFAULT_CHIP_ICON;
         const iconColor = isActive ? "#fff" : CATEGORY_ICON_COLORS[c] ?? L.primary;
         return (
           <AnimatedPressable
@@ -258,15 +264,25 @@ const LastReadCard = memo(function LastReadCard({
   progress,
   loading,
   onPress,
+  compact = false,
 }: {
   book: DisplayBook | null;
   progress: number;
   loading: boolean;
   onPress: () => void;
+  compact?: boolean;
 }) {
   const { colors: L } = useTheme();
 
   if (loading) {
+    if (compact) {
+      return (
+        <View style={[styles.compactContinue, { backgroundColor: L.bgCard, borderColor: L.border }]}>
+          <SkeletonBox w={18} h={18} r={9} />
+          <SkeletonBox w="72%" h={13} r={6} />
+        </View>
+      );
+    }
     return (
       <View style={[lastReadCardBase(L), { paddingVertical: 0 }]}>
         <View style={{ flexDirection: "row", paddingHorizontal: 14, paddingVertical: 12, gap: 12, alignItems: "center" }}>
@@ -283,6 +299,15 @@ const LastReadCard = memo(function LastReadCard({
   }
 
   if (!book) {
+    if (compact) {
+      return (
+        <Pressable onPress={() => router.push("/(tabs)/tokcha")} style={[styles.compactContinue, { backgroundColor: L.bgCard, borderColor: L.border }]}>
+          <MaterialCommunityIcons name="book-open-variant" size={18} color={L.primary} />
+          <Text numberOfLines={1} style={{ flex: 1, color: L.text, fontSize: 13, fontWeight: "800" }}>Kitob o‘qishni boshlash</Text>
+          <Text style={{ color: L.primary, fontSize: 12, fontWeight: "800" }}>Boshlash →</Text>
+        </Pressable>
+      );
+    }
     return (
       <Pressable onPress={() => router.push("/(tabs)/tokcha")} style={lastReadCardBase(L)}>
         <LinearGradient
@@ -305,6 +330,19 @@ const LastReadCard = memo(function LastReadCard({
   }
 
   const pct = Math.max(0, Math.min(100, Math.round(progress)));
+
+  if (compact) {
+    return (
+      <Pressable onPress={onPress} style={[styles.compactContinue, { backgroundColor: L.bgCard, borderColor: L.border }]}>
+        <MaterialCommunityIcons name="book-open-page-variant" size={18} color={L.primary} />
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={{ color: L.primary, fontSize: 9.5, fontWeight: "900", letterSpacing: 0.7, textTransform: "uppercase" }}>Davom etamizmi?</Text>
+          <Text numberOfLines={1} style={{ color: L.text, fontSize: 13, fontWeight: "800", marginTop: 1 }}>{book.title}</Text>
+        </View>
+        <Text style={{ color: L.primary, fontSize: 12, fontWeight: "800" }}>{pct}%  →</Text>
+      </Pressable>
+    );
+  }
 
   return (
     <RotatingLastReadGlow theme={L}>
@@ -514,6 +552,17 @@ const styles = StyleSheet.create({
     borderRadius: 68,
     opacity: 0.24,
   },
+  compactContinue: {
+    marginHorizontal: 16,
+    minHeight: 54,
+    borderRadius: 17,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
 });
 
 function chipBase(L: AppTheme) {
@@ -558,6 +607,7 @@ function lastReadCardBase(L: AppTheme, framed = false) {
  * means the mobile screen's hook order is never affected by the breakpoint.
  */
 export default function HomeScreen() {
+  console.log("[Home] ACTIVE HOME SCREEN");
   const { isWebLayout } = useResponsive();
   return isWebLayout ? <WebHome /> : <MobileHomeScreen />;
 }
@@ -577,17 +627,20 @@ function MobileHomeScreen() {
   const cPad = (sw - cW) / 2;
   const carouselStep = cW + cGap;
 
-  const [activeCat, setActiveCat] = useState<Cat>("Hammasi");
+  const [activeCat, setActiveCat] = useState<Cat>(ALL_CHIP);
   const [carouselIdx, setCarouselIdx] = useState(0);
   const [lastBookId, setLastBookId] = useState<string | null>(null);
   const [lastBookProgress, setLastBookProgress] = useState(0);
   const [headerAvatarError, setHeaderAvatarError] = useState(false);
   const { userId, refreshProfileRow } = useAuth();
+  const { ad: homeHeroAd, collapsed: homeHeroAdCollapsed, setCollapsed: setHomeHeroAdCollapsed } = useHomeHeroAd();
 
   useEffect(() => { setHeaderAvatarError(false); }, [profile.avatarUrl]);
   const { count: unreadCount, refresh: refreshUnreadCount } = useUnreadNotificationCount();
 
   const { books: supaBooks, loading: booksLoading, refetch } = usePublishedBooks();
+  const { genres } = useContentGenres();
+  const { categories } = useContentCategories("book");
   const { cards: articleCards, refetch: refetchArticles } = useHomeArticleCards();
   const handleRefresh = useCallback(async () => {
     await Promise.all([refetch(), refetchArticles(), refreshProfileRow(), refreshUnreadCount()]);
@@ -629,10 +682,35 @@ function MobileHomeScreen() {
     [lastBookId, supaBooks]
   );
 
+  // Only offer a chip when at least one published book actually carries it, so
+  // tapping a chip can never land on an empty shelf.
+  const genreChips = useMemo(
+    () => [
+      ALL_CHIP,
+      ...genres.filter((g) => supaBooks.some((b) => bookMatchesGenre(b, g))).map((g) => g.name),
+    ],
+    [genres, supaBooks]
+  );
+
+  const categoryChips = useMemo(
+    () =>
+      categories
+        .filter((cat) => supaBooks.some((b) => bookMatchesCategory(b, cat)))
+        .map((cat) => cat.name),
+    [categories, supaBooks]
+  );
+
   const gridBooks = useMemo(() => {
-    const list = activeCat === "Hammasi" ? supaBooks : supaBooks.filter((b) => b.genre === activeCat);
-    return list.slice(0, 8);
-  }, [activeCat, supaBooks]);
+    if (activeCat === ALL_CHIP) return supaBooks.slice(0, 8);
+
+    const genre = genres.find((g) => g.name === activeCat);
+    if (genre) return supaBooks.filter((b) => bookMatchesGenre(b, genre)).slice(0, 8);
+
+    const category = categories.find((cat) => cat.name === activeCat);
+    if (category) return supaBooks.filter((b) => bookMatchesCategory(b, category)).slice(0, 8);
+
+    return [];
+  }, [activeCat, supaBooks, genres, categories]);
 
   useEffect(() => {
     if (prevIdxRef.current === carouselIdx) return;
@@ -732,9 +810,6 @@ function MobileHomeScreen() {
         <View style={{ paddingBottom: 18, paddingHorizontal: 20, paddingTop: insets.top + 16, backgroundColor: L.bg }}>
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
             <View style={{ flexDirection: "row", alignItems: "center" }}>
-              <FadeSlideIn delay={50} distance={10}>
-                <BrandLogo variant="logo" size={34} radius={11} style={{ marginRight: 10 }} />
-              </FadeSlideIn>
               <FadeSlideIn delay={80} distance={10}>
               <PressableScale onPress={() => router.push("/(tabs)/profile")} style={{ width: 54, height: 54, borderRadius: 27, borderWidth: 2.5, borderColor: L.primary, overflow: "hidden" }}>
                 {profile.avatarUrl && !headerAvatarError ? (
@@ -791,12 +866,32 @@ function MobileHomeScreen() {
 
         {/* ── LAST READ CARD ──────────────────────────────────────────────────── */}
         <FadeSlideIn delay={240} distance={20} style={{ marginTop: 0 }}>
+          {homeHeroAd ? (
+            <View style={{ gap: 10 }}>
+              <View style={{ marginHorizontal: 16 }}>
+                <HomeHeroAdCard
+                  ad={homeHeroAd}
+                  collapsed={homeHeroAdCollapsed}
+                  onCollapsedChange={setHomeHeroAdCollapsed}
+                  height={Math.max(180, Math.min(240, sw * 0.54))}
+                />
+              </View>
+              <LastReadCard
+                book={lastReadBook}
+                progress={lastBookProgress}
+                loading={booksLoading && !lastBookId}
+                compact={!homeHeroAdCollapsed}
+                onPress={() => lastBookId && onBook(lastBookId)}
+              />
+            </View>
+          ) : (
           <LastReadCard
             book={lastReadBook}
             progress={lastBookProgress}
             loading={booksLoading && !lastBookId}
             onPress={() => lastBookId && onBook(lastBookId)}
           />
+          )}
         </FadeSlideIn>
 
         {/* ── ADABIYOTLAR SECTION ─────────────────────────────────────────────── */}
@@ -805,24 +900,24 @@ function MobileHomeScreen() {
           <Text style={{ color: L.primary, fontSize: 13, fontWeight: "600" }}>Barcha asarlar</Text>
         </FadeSlideIn>
 
-        {/* ── GENRE CHIPS ─────────────────────────────────────────────────────── */}
-        <SlideFromLeft delay={380}>
-          <ChipRow
-            cats={GENRE_CATS}
-            icons={GENRE_ICONS}
-            active={activeCat}
-            onSelect={(next) => {
-              if (next === "Ssenariy") {
-                router.push("/screenplays");
-                return;
-              }
-              setActiveCat(next);
-            }}
-          />
-        </SlideFromLeft>
-        <SlideFromRight delay={460} style={{ marginTop: 8 }}>
-          <ChipRow cats={THEME_CATS} icons={THEME_ICONS} active={activeCat} onSelect={setActiveCat} />
-        </SlideFromRight>
+        {/* ── JANRLAR / KATEGORIYALAR ─────────────────────────────────────────── */}
+        <FadeSlideIn delay={360} distance={12}>
+          <TaxonomyShortcutButtons />
+        </FadeSlideIn>
+
+        {/* ── JANR CHIPS (content_genres) ─────────────────────────────────────── */}
+        {genreChips.length > 1 ? (
+          <SlideFromLeft delay={380}>
+            <ChipRow cats={genreChips} active={activeCat} onSelect={setActiveCat} />
+          </SlideFromLeft>
+        ) : null}
+
+        {/* ── KATEGORIYA CHIPS (content_categories) ───────────────────────────── */}
+        {categoryChips.length > 0 ? (
+          <SlideFromRight delay={460} style={{ marginTop: 8 }}>
+            <ChipRow cats={categoryChips} active={activeCat} onSelect={setActiveCat} />
+          </SlideFromRight>
+        ) : null}
 
         {/* ── CAROUSEL ────────────────────────────────────────────────────────── */}
         <FadeSlideIn delay={520} distance={18} style={{ marginTop: 22 }}>

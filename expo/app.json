@@ -1,25 +1,19 @@
 {
   "expo": {
     "name": "AdabiyotX",
-    "slug": "xu1w72t9fgl1cjekjo90f",
+    "slug": "adabiyotx",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": ["rork-app", "adabiyotx"],
+    "scheme": "adabiyotx",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
-    "splash": {
-      "image": "./assets/images/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
-    },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "app.rork.xu1w72t9fgl1cjekjo90f",
+      "bundleIdentifier": "uz.adabiyotx.app",
       "usesAppleSignIn": true,
       "infoPlist": {
         "UIBackgroundModes": [
-          "audio",
           "audio"
         ],
         "ITSAppUsesNonExemptEncryption": false
@@ -28,9 +22,9 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#F7F4ED"
       },
-      "package": "app.rork.xu1w72t9fgl1cjekjo90f",
+      "package": "uz.adabiyotx.app",
       "permissions": [
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
@@ -44,23 +38,36 @@
       [
         "expo-router",
         {
-          "origin": "https://rork.com/"
+          "origin": "https://adabiyotx.uz"
         }
       ],
       "expo-font",
       "expo-web-browser",
       "expo-video",
-      "expo-apple-authentication"
+      "expo-apple-authentication",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 220,
+          "resizeMode": "contain",
+          "backgroundColor": "#F7F4ED",
+          "dark": {
+            "image": "./assets/images/splash-icon.png",
+            "backgroundColor": "#0D1117"
+          }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
     },
     "extra": {
       "router": {
-        "origin": "https://rork.com/"
+        "origin": "https://adabiyotx.uz"
       },
       "eas": {
-        "projectId": "cebe4bd6-9428-4454-9beb-b0fbd2312fd2"
+        "projectId": "51bfbdc4-a4b5-4241-a058-78773ef722ab"
       }
     },
     "owner": "jaxongirman"

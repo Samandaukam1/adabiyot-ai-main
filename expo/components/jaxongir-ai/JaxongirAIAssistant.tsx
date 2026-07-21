@@ -18,6 +18,7 @@ import {
   Text,
   TextInput,
   TouchableWithoutFeedback,
+  useWindowDimensions,
   View,
 } from "react-native";
 import type { BookContext } from "@/utils/jaxongirContext";
@@ -58,6 +59,17 @@ export default function JaxongirAIAssistant({ isOpen, onClose, sourceScreen, pro
   const [videoError, setVideoError] = useState(false);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
+
+  // ── Web layout ────────────────────────────────────────────────────────────
+  // The mobile design fills ~80% of the (phone) screen width. In a wide browser
+  // that constant blows up, so on web ≥768px we render a compact, screen-fitted
+  // chat card instead: avatar on top, a growing chat area in the middle and a
+  // small input bar at the bottom. Native phone layout is untouched.
+  const { width: winW, height: winH } = useWindowDimensions();
+  const isWebPanel = Platform.OS === "web" && winW >= 768;
+  const webPanelW = Math.min(460, winW - 40);
+  const webAvatar = Math.min(300, webPanelW - 40);
+  const webCardH = Math.min(Math.round(winH * 0.86), 760);
 
   // Animations
   const slideX    = useRef(new Animated.Value(-W)).current;
@@ -156,7 +168,7 @@ export default function JaxongirAIAssistant({ isOpen, onClose, sourceScreen, pro
       current_book: currentBook ?? null,
     };
 
-    console.log("JAXONGIR AI SEND:", {
+    if (__DEV__) console.log("JAXONGIR AI SEND:", {
       message: text,
       source_screen: requestBody.source_screen,
       prompt_context: requestBody.prompt_context,
@@ -183,7 +195,7 @@ export default function JaxongirAIAssistant({ isOpen, onClose, sourceScreen, pro
         setUiState("error");
         setMessages(p => [...p, { role: "assistant", text: "Kechirasiz, hozir javob olishda muammo yuz berdi." }]);
       } else {
-        console.log("JAXONGIR AI RESPONSE:", { prompt_type: data.prompt_type, answerLength: data.answer.length });
+        if (__DEV__) console.log("JAXONGIR AI RESPONSE:", { prompt_type: data.prompt_type, answerLength: data.answer.length });
         setUiState("talking");
         setMessages(p => [...p, { role: "assistant", text: data.answer }]);
         setTimeout(() => setUiState("idle"), 3600);
@@ -221,7 +233,7 @@ export default function JaxongirAIAssistant({ isOpen, onClose, sourceScreen, pro
   return (
     <Modal visible transparent animationType="none" onRequestClose={onClose} statusBarTranslucent>
       {/* Full screen dark backdrop */}
-      <Animated.View style={[StyleSheet.absoluteFill, styles.backdrop, { opacity: backdrop }]}>
+      <Animated.View style={[StyleSheet.absoluteFill, styles.backdrop, isWebPanel && { backgroundColor: "rgba(0,0,0,0.5)" }, { opacity: backdrop }]}>
         <TouchableWithoutFeedback onPress={onClose}>
           <View style={StyleSheet.absoluteFill} />
         </TouchableWithoutFeedback>
@@ -244,13 +256,31 @@ export default function JaxongirAIAssistant({ isOpen, onClose, sourceScreen, pro
           style={[
             styles.content,
             keyboardOpen && styles.contentWithKeyboard,
-            { transform: [{ translateX: slideX }, { translateY: contentY }] },
+            isWebPanel && ({
+              width: webPanelW,
+              height: webCardH,
+              gap: 12,
+              padding: 14,
+              borderRadius: 26,
+              backgroundColor: "rgba(9,18,14,0.42)",
+              borderWidth: 1,
+              borderColor: "rgba(82,183,136,0.26)",
+              justifyContent: "flex-start",
+              backdropFilter: "blur(22px)",
+              WebkitBackdropFilter: "blur(22px)",
+            } as any),
+            {
+              transform: isWebPanel
+                ? [{ translateY: contentY }]
+                : [{ translateX: slideX }, { translateY: contentY }],
+            },
           ]}
         >
           {/* ── 1:1 video / avatar ── */}
           <Animated.View
             style={[
               styles.videoFrame,
+              isWebPanel && { width: webAvatar, flexShrink: 0 },
               {
                 shadowColor: glowColor as any,
                 shadowRadius: glowShadowR as any,
@@ -265,7 +295,7 @@ export default function JaxongirAIAssistant({ isOpen, onClose, sourceScreen, pro
               style={[StyleSheet.absoluteFill, styles.videoGlowRing, { borderColor: glowColor as any, opacity: glowOpacity }]}
             />
 
-            <View style={styles.videoWrap}>
+            <View style={[styles.videoWrap, isWebPanel && { width: webAvatar }]}>
               {useNativeTransparent ? (
                 // iOS HEVC-alpha → native AVPlayerLayer view (alpha composites)
                 <TransparentVideoView
@@ -274,12 +304,18 @@ export default function JaxongirAIAssistant({ isOpen, onClose, sourceScreen, pro
                   pointerEvents="none"
                 />
               ) : showVideoPlayer ? (
-                <>
-                  <GaplessAvatarVideo url={video!.video_url} onError={handleVideoError} />
-                  <View style={styles.videoDimmer} pointerEvents="none" />
-                  {/* Blocks iOS native play-button tap overlay */}
-                  <View style={StyleSheet.absoluteFill} pointerEvents="box-only" />
-                </>
+                isWebPanel ? (
+                  // Web: a raw <video> autoplays the WebM/VP9-alpha reliably
+                  // (expo-video's web wrapper often stalls on the first frame).
+                  <WebAvatarVideo url={video!.video_url} poster={video?.poster_url} onError={handleVideoError} />
+                ) : (
+                  <>
+                    <GaplessAvatarVideo url={video!.video_url} onError={handleVideoError} />
+                    <View style={styles.videoDimmer} pointerEvents="none" />
+                    {/* Blocks iOS native play-button tap overlay */}
+                    <View style={StyleSheet.absoluteFill} pointerEvents="box-only" />
+                  </>
+                )
               ) : video?.poster_url ? (
                 <Image
                   source={{ uri: video.poster_url }}
@@ -305,13 +341,23 @@ export default function JaxongirAIAssistant({ isOpen, onClose, sourceScreen, pro
           </Animated.View>
 
           {/* Messages (when present) */}
-          {messages.length > 0 && (
+          {(messages.length > 0 || isWebPanel) && (
             <ScrollView
               ref={scrollRef}
-              style={[styles.messages, { maxHeight: MSGS_MAX_H }]}
+              style={[
+                styles.messages,
+                { maxHeight: MSGS_MAX_H },
+                isWebPanel && { flex: 1, width: "100%", maxHeight: undefined },
+              ]}
               showsVerticalScrollIndicator={false}
-              contentContainerStyle={{ paddingVertical: 8, gap: 7 }}
+              contentContainerStyle={[
+                { paddingVertical: 8, gap: 7 },
+                isWebPanel && messages.length === 0 && { flexGrow: 1, justifyContent: "center", alignItems: "center" },
+              ]}
             >
+              {isWebPanel && messages.length === 0 ? (
+                <Text style={styles.webEmptyHint}>Kitoblar, she'rlar yoki mualliflar haqida so'rang…</Text>
+              ) : null}
               {messages.map((msg, i) => (
                 <MessageBubble key={i} message={msg} />
               ))}
@@ -328,6 +374,7 @@ export default function JaxongirAIAssistant({ isOpen, onClose, sourceScreen, pro
           <Animated.View
             style={[
               styles.barOuter,
+              isWebPanel && { width: "100%", flexShrink: 0 },
               {
                 shadowColor: glowColor as any,
                 shadowRadius: glowShadowR as any,
@@ -339,6 +386,7 @@ export default function JaxongirAIAssistant({ isOpen, onClose, sourceScreen, pro
           >
             {/* Animated glow border */}
             <Animated.View
+              pointerEvents="none"
               style={[StyleSheet.absoluteFill, styles.glowRing, { borderColor: glowColor as any, opacity: glowOpacity }]}
             />
 
@@ -357,7 +405,7 @@ export default function JaxongirAIAssistant({ isOpen, onClose, sourceScreen, pro
 
             {/* Input */}
             <TextInput
-              style={styles.barInput}
+              style={[styles.barInput, isWebPanel && ({ cursor: "text", outlineStyle: "none" } as any)]}
               placeholder={messages.length === 0 ? "Jaxongir AI ga savol yozing…" : "Davom ettiring…"}
               placeholderTextColor="rgba(225,255,238,0.58)"
               value={input}
@@ -388,6 +436,48 @@ export default function JaxongirAIAssistant({ isOpen, onClose, sourceScreen, pro
 }
 
 /**
+ * Web avatar playback — a raw HTML5 <video>.
+ *
+ * On the web the admin's transparent WebM (VP9 alpha) plays fine in the browser,
+ * but expo-video's <VideoView> web wrapper frequently fails to autoplay and
+ * leaves the clip frozen on its first frame. A plain <video autoplay muted loop
+ * playsinline> autoplays reliably; `object-fit: contain` keeps Jaxongir centred
+ * and the alpha channel composites over the frame behind. Web-only — never
+ * mounted on native, so `React.createElement("video")` is never evaluated there.
+ */
+function WebAvatarVideo({ url, poster, onError }: { url: string; poster?: string | null; onError: () => void }) {
+  const ref = useRef<any>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.muted = true;
+    el.defaultMuted = true;
+    const p = el.play?.();
+    if (p && typeof p.catch === "function") p.catch(() => {});
+  }, [url]);
+  return React.createElement("video", {
+    ref,
+    src: url,
+    poster: poster ?? undefined,
+    autoPlay: true,
+    muted: true,
+    loop: true,
+    playsInline: true,
+    "webkit-playsinline": "true",
+    onError,
+    style: {
+      position: "absolute",
+      inset: 0,
+      width: "100%",
+      height: "100%",
+      objectFit: "contain",
+      objectPosition: "center",
+      background: "transparent",
+    },
+  } as any);
+}
+
+/**
  * Gapless avatar playback.
  *
  * Two stacked players: the visible one loops the current clip seamlessly
@@ -397,7 +487,17 @@ export default function JaxongirAIAssistant({ isOpen, onClose, sourceScreen, pro
  * hand over to the pre-buffered clip with zero delay. If nothing is queued, the
  * current clip simply loops on, so the idle animation never stops.
  */
-function GaplessAvatarVideo({ url, onError }: { url: string; onError: () => void }) {
+function GaplessAvatarVideo({
+  url,
+  onError,
+  activeOpacity = 0.74,
+  contentFit = "contain",
+}: {
+  url: string;
+  onError: () => void;
+  activeOpacity?: number;
+  contentFit?: "contain" | "cover";
+}) {
   const playerA = useVideoPlayer(null, (p) => { p.loop = true; p.muted = true; });
   const playerB = useVideoPlayer(null, (p) => { p.loop = true; p.muted = true; });
 
@@ -487,16 +587,16 @@ function GaplessAvatarVideo({ url, onError }: { url: string; onError: () => void
     <>
       <VideoView
         player={playerA}
-        style={[baseStyle, { opacity: activeIsA ? 0.74 : 0 }]}
-        contentFit="contain"
+        style={[baseStyle, { opacity: activeIsA ? activeOpacity : 0 }]}
+        contentFit={contentFit}
         nativeControls={false}
         allowsFullscreen={false}
         allowsPictureInPicture={false}
       />
       <VideoView
         player={playerB}
-        style={[baseStyle, { opacity: activeIsA ? 0 : 0.74 }]}
-        contentFit="contain"
+        style={[baseStyle, { opacity: activeIsA ? 0 : activeOpacity }]}
+        contentFit={contentFit}
         nativeControls={false}
         allowsFullscreen={false}
         allowsPictureInPicture={false}
@@ -615,6 +715,13 @@ const styles = StyleSheet.create({
   bubbleTxt:  { fontSize: 14, lineHeight: 20 },
   thinkingRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingLeft: 4 },
   thinkingTxt: { color: "#6B7280", fontSize: 13, fontStyle: "italic" },
+  webEmptyHint: {
+    color: "rgba(180,220,200,0.55)",
+    fontSize: 14,
+    fontWeight: "500",
+    textAlign: "center",
+    paddingHorizontal: 20,
+  },
   // Pill bar
   barOuter: {
     width: ITEM_W,

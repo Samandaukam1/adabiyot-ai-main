@@ -1,18 +1,34 @@
 import React from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, StyleSheet, View } from "react-native";
 import BrandLogo from "@/components/BrandLogo";
-import { FONT } from "@/components/ui";
-import { useBranding } from "@/providers/BrandingProvider";
 import { useTheme } from "@/providers/ThemeProvider";
+
+/**
+ * The launch gate shown while the session + splash config resolve.
+ *
+ * It is deliberately a PIXEL CONTINUATION of the native splash screen, not a
+ * second branded screen: same background colours as `expo-splash-screen` in
+ * app.json, the same bundled mark at the same relative size, no wordmark and no
+ * coloured badge. Handing over from the native splash should look like nothing
+ * happened — otherwise the user sees "logo → another logo → animation".
+ */
+const SPLASH_BG_LIGHT = "#F7F4ED";
+const SPLASH_BG_DARK = "#0D1117";
+/** Matches `imageWidth: 220` in the app.json expo-splash-screen config. */
+const SPLASH_MARK_SIZE = 220;
 
 export default function BrandingLoadingScreen() {
   const { colors } = useTheme();
-  const { appName } = useBranding();
+  const isDark = colors.isDark;
 
   return (
-    <View style={[styles.root, { backgroundColor: colors.bg }]}>
-      <BrandLogo variant="splash" size={92} radius={26} style={styles.logo} />
-      <Text style={[styles.title, { color: colors.text }]}>{appName}</Text>
+    <View
+      style={[
+        styles.root,
+        { backgroundColor: isDark ? SPLASH_BG_DARK : SPLASH_BG_LIGHT },
+      ]}
+    >
+      <BrandLogo variant="splash" size={SPLASH_MARK_SIZE} plain bundledOnly />
       <ActivityIndicator color={colors.primary} style={styles.spinner} />
     </View>
   );
@@ -25,20 +41,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 28,
   },
-  logo: {
-    shadowColor: "#000",
-    shadowOpacity: 0.14,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 8,
-  },
-  title: {
-    marginTop: 16,
-    fontSize: 28,
-    fontWeight: "900",
-    fontFamily: FONT.serif,
-  },
   spinner: {
-    marginTop: 18,
+    position: "absolute",
+    bottom: 72,
   },
 });

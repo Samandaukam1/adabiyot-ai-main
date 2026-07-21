@@ -32,11 +32,26 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { FONT, PressableScale } from "@/components/ui";
+import { useBranding } from "@/providers/BrandingProvider";
+import ReaderTitlePage from "@/components/reader/ReaderTitlePage";
+import PageFlipEffect from "@/components/reader/PageFlipEffect";
+import WebPageFlipReader from "@/components/reader/WebPageFlipReader";
 import { palette } from "@/constants/colors";
 import { getAuthor, getBook, sampleBookContent, type ReaderImageBlock } from "@/mocks/content";
 import { useApp } from "@/providers/AppProvider";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
+
+// On the web a full-window page would sprawl edge-to-edge; cap it to a premium,
+// centred "book" column so typography + pagination match what's shown. On native
+// this is exactly the screen width, so behaviour is unchanged.
+const IS_WEB = Platform.OS === "web";
+const PAGE_W = IS_WEB ? Math.min(SCREEN_W, 680) : SCREEN_W;
+
+// Book-like page-flip animation over the existing horizontal pager. Flip this to
+// `false` to instantly restore the classic swipe reader (also auto-falls back on
+// web or if the flip library errors — see components/reader/PageFlipEffect.tsx).
+const ENABLE_PAGE_FLIP = true;
 
 const READER_PREFS_KEY = "adabiyot.reader.prefs.v1";
 const AUTO_LINE_HEIGHT = 1.55;
@@ -65,6 +80,8 @@ interface Page {
   endTime: number;
   anchorKey: string;
   firstGlobalIndex: number;
+  /** Synthetic intro/cover page (logo, title, author, year) — always page 0. */
+  isCover?: boolean;
 }
 
 interface ReaderPrefs {
@@ -274,7 +291,7 @@ function buildPages(
   const pages: Page[] = [];
   const fontSize = 17 * fontScale;
   const lineH = fontSize * lineHeight;
-  const charsPerLine = Math.floor((SCREEN_W - 56) / (fontSize * getCharWidthMultiplier(fontKey)));
+  const charsPerLine = Math.floor((PAGE_W - 56) / (fontSize * getCharWidthMultiplier(fontKey)));
   const linesPerPage = Math.max(6, Math.floor(availableHeight / lineH) - 1);
 
   let globalParagraphIndex = 0;
@@ -305,7 +322,7 @@ function buildPages(
     };
 
     // Estimated image height in lines (image fills content width at ~0.6 ratio + caption)
-    const imageWidthPx = SCREEN_W - 112;
+    const imageWidthPx = PAGE_W - 112;
     const imageHeightPx = imageWidthPx * 0.6 + 36;
     const imageLinesEstimate = Math.ceil(imageHeightPx / lineH) + 1;
 
@@ -478,6 +495,22 @@ export default function StableReaderExperience() {
   const insets = useSafeAreaInsets();
   const book = useMemo(() => getBook(String(id)), [id]);
   const author = useMemo(() => (book ? getAuthor(book.authorId) : undefined), [book]);
+  const { appName, branding } = useBranding();
+  // Logo comes ONLY from admin Branding settings — never a bundled/static asset.
+  const brandingLogoUrl =
+    branding.logo_url || branding.splash_logo_url || branding.app_icon_url || null;
+  // Year for the intro page — prefer a real date field, else omit (never current year).
+  const bookYear = useMemo(() => {
+    const raw = book as unknown as Record<string, unknown> | undefined;
+    const candidate =
+      (raw?.year as string | number | undefined) ??
+      (raw?.publishedAt as string | undefined) ??
+      (raw?.published_at as string | undefined) ??
+      (raw?.createdAt as string | undefined) ??
+      (raw?.created_at as string | undefined);
+    const match = candidate != null ? String(candidate).match(/\d{4}/) : null;
+    return match ? match[0] : null;
+  }, [book]);
   const {
     fontScale,
     setFontScale,
@@ -521,10 +554,24 @@ export default function StableReaderExperience() {
   const fontFamily = getFontFamily(prefs.fontKey);
   const lineHeightValue = AUTO_LINE_HEIGHT;
 
-  const pages = useMemo(
-    () => buildPages(fontScale, lineHeightValue, availH, prefs.fontKey),
-    [availH, fontScale, lineHeightValue, prefs.fontKey]
-  );
+  const pages = useMemo(() => {
+    const built = buildPages(fontScale, lineHeightValue, availH, prefs.fontKey);
+    // Intro/cover page (logo · title · author · year) is always page 0. It carries
+    // no paragraphs and a negative time range so audio-sync + pageLookup ignore it,
+    // while TOC/search page indices (derived from this same array) stay correct.
+    const cover: Page = {
+      chapterIndex: -1,
+      chapterTitle: "",
+      paragraphs: [],
+      isChapterStart: false,
+      startTime: -1,
+      endTime: -1,
+      anchorKey: "__cover__",
+      firstGlobalIndex: -1,
+      isCover: true,
+    };
+    return [cover, ...built];
+  }, [availH, fontScale, lineHeightValue, prefs.fontKey]);
 
   const paragraphCatalog = useMemo(() => {
     return sampleBookContent.chapters.flatMap((chapter, chapterIndex) =>
@@ -798,6 +845,16 @@ export default function StableReaderExperience() {
 
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 60 }).current;
 
+  // Page-flip → page change. Same effect as onViewableItemsChanged so pagination,
+  // progress and anchor tracking behave identically whichever pager is active.
+  const handleFlipPageChange = useCallback((nextIndex: number) => {
+    setPageIndex(nextIndex);
+    const nextAnchor = pagesRef.current[nextIndex]?.anchorKey;
+    if (nextAnchor) {
+      anchorKeyRef.current = nextAnchor;
+    }
+  }, []);
+
   const openAudio = useCallback(() => {
     if (!book || !currentPage) return;
     saveBookmark({
@@ -939,20 +996,78 @@ export default function StableReaderExperience() {
     [jumpToPage, resetSelection]
   );
 
+  // Single source of truth for a page tap: reset an open selection, else toggle
+  // the top/bottom chrome. Used by the flip pager (via a composed Tap gesture) AND
+  // the fallback FlatList (via the page Pressable) so behaviour is identical.
+  const handlePageTap = useCallback(() => {
+    if (selection) {
+      resetSelection();
+      return;
+    }
+    setShowControls((current) => !current);
+  }, [selection, resetSelection]);
+
+  // When the flip pager is active it owns taps through a real Gesture.Tap that is
+  // exclusive with the pan — so the page Pressable must NOT also handle onPress
+  // (two competing responders is what made controls flaky after a few flips).
+  const usingFlip = ENABLE_PAGE_FLIP && Platform.OS !== "web" && pages.length > 0;
+
   const renderPage = useCallback(
-    ({ item, index }: { item: Page; index: number }) => (
+    ({ item, index }: { item: Page; index: number }) => {
+      if (item.isCover) {
+        return (
+          <Pressable
+            onPress={usingFlip ? undefined : handlePageTap}
+            style={[
+              styles.page,
+              {
+                width: PAGE_W,
+                paddingTop: insets.top + 84,
+                paddingBottom: insets.bottom + 138,
+              },
+            ]}
+          >
+            <View style={styles.pageFrame}>
+              <View
+                style={[
+                  styles.pagePaper,
+                  {
+                    backgroundColor: pageTheme.pageStart,
+                    borderColor: pageTheme.pageBorder,
+                    shadowColor: pageTheme.pageShadow,
+                  },
+                ]}
+              >
+                <LinearGradient
+                  colors={[pageTheme.pageStart, pageTheme.pageEnd]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={StyleSheet.absoluteFillObject}
+                />
+                <ReaderTitlePage
+                  logoUrl={brandingLogoUrl}
+                  appName={appName}
+                  title={book?.title ?? ""}
+                  authorName={author?.name ?? null}
+                  year={bookYear}
+                  category={book?.category ?? null}
+                  backgroundColor="transparent"
+                  textColor={pageTheme.text}
+                  mutedColor={pageTheme.textMuted}
+                  accentColor={palette.primary}
+                />
+              </View>
+            </View>
+          </Pressable>
+        );
+      }
+      return (
       <Pressable
-        onPress={() => {
-          if (selection) {
-            resetSelection();
-            return;
-          }
-          setShowControls((current) => !current);
-        }}
+        onPress={usingFlip ? undefined : handlePageTap}
         style={[
           styles.page,
           {
-            width: SCREEN_W,
+            width: PAGE_W,
             paddingTop: insets.top + 84,
             paddingBottom: insets.bottom + 138,
           },
@@ -1019,16 +1134,23 @@ export default function StableReaderExperience() {
                 />
               ))}
             </View>
-            <View style={[styles.pageFoot, { borderTopColor: pageTheme.progressTrack }]}> 
-              <Text style={[styles.pageNumber, { color: pageTheme.text }]}>{index + 1}</Text>
+            <View style={[styles.pageFoot, { borderTopColor: pageTheme.progressTrack }]}>
+              <Text style={[styles.pageNumber, { color: pageTheme.text }]}>{index}</Text>
               <View style={[styles.pageDot, { backgroundColor: pageTheme.textMuted }]} />
-              <Text style={[styles.pageTotal, { color: pageTheme.textMuted }]}>{totalPages}</Text>
+              <Text style={[styles.pageTotal, { color: pageTheme.textMuted }]}>{Math.max(1, totalPages - 1)}</Text>
             </View>
           </View>
         </View>
       </Pressable>
-    ),
+      );
+    },
     [
+      appName,
+      brandingLogoUrl,
+      author?.name,
+      book?.title,
+      book?.category,
+      bookYear,
       activeSearchQuery,
       annotationsByParagraph,
       fontFamily,
@@ -1047,7 +1169,8 @@ export default function StableReaderExperience() {
       pageTheme.selection,
       pageTheme.text,
       pageTheme.textMuted,
-      resetSelection,
+      handlePageTap,
+      usingFlip,
       selection,
       totalPages,
     ]
@@ -1071,25 +1194,47 @@ export default function StableReaderExperience() {
           setAvailH((previous) => (Math.abs(previous - height) > 2 ? height : previous));
         }}
       >
-        <FlatList
-          ref={listRef}
-          data={pages}
-          keyExtractor={(_, index) => `reader-page-${index}`}
-          renderItem={renderPage}
-          horizontal
-          pagingEnabled
-          showsHorizontalScrollIndicator={false}
-          onViewableItemsChanged={onViewableItemsChanged}
-          viewabilityConfig={viewabilityConfig}
-          getItemLayout={(_, index) => ({ length: SCREEN_W, offset: SCREEN_W * index, index })}
-          initialNumToRender={3}
-          windowSize={5}
-          onScrollToIndexFailed={(info) => {
-            setTimeout(() => {
-              listRef.current?.scrollToIndex({ index: info.index, animated: false });
-            }, 50);
-          }}
-        />
+        {IS_WEB ? (
+          // Web: a premium, centred book column with a DOM-friendly page flip.
+          <WebPageFlipReader
+            pages={pages}
+            currentPage={pageIndex}
+            onPageChange={handleFlipPageChange}
+            onTap={handlePageTap}
+            renderPage={renderPage}
+            pageWidth={PAGE_W}
+          />
+        ) : (
+          <PageFlipEffect
+            enabled={ENABLE_PAGE_FLIP}
+            pages={pages}
+            currentPage={pageIndex}
+            onPageChange={handleFlipPageChange}
+            onTap={handlePageTap}
+            renderPage={renderPage}
+            fallback={
+              <FlatList
+                ref={listRef}
+                data={pages}
+                keyExtractor={(_, index) => `reader-page-${index}`}
+                renderItem={renderPage}
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                onViewableItemsChanged={onViewableItemsChanged}
+                viewabilityConfig={viewabilityConfig}
+                getItemLayout={(_, index) => ({ length: PAGE_W, offset: PAGE_W * index, index })}
+                initialNumToRender={3}
+                windowSize={5}
+                onScrollToIndexFailed={(info) => {
+                  setTimeout(() => {
+                    listRef.current?.scrollToIndex({ index: info.index, animated: false });
+                  }, 50);
+                }}
+              />
+            }
+          />
+        )}
       </View>
 
       {showControls ? (
@@ -2068,6 +2213,53 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 28,
     paddingTop: 30,
+  },
+  coverInner: {
+    flex: 1,
+    paddingHorizontal: 32,
+    paddingVertical: 44,
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  coverBrand: {
+    alignItems: "center",
+    gap: 12,
+  },
+  coverWordmark: {
+    fontSize: 15,
+    fontWeight: "800",
+    letterSpacing: 3,
+    fontFamily: FONT.serif,
+  },
+  coverCenter: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 6,
+  },
+  coverRule: {
+    width: 48,
+    height: 2,
+    borderRadius: 2,
+    marginBottom: 26,
+    opacity: 0.85,
+  },
+  coverTitle: {
+    fontSize: 30,
+    lineHeight: 40,
+    fontWeight: "800",
+    textAlign: "center",
+  },
+  coverAuthor: {
+    marginTop: 16,
+    fontSize: 16,
+    fontWeight: "600",
+    letterSpacing: 0.4,
+    textAlign: "center",
+  },
+  coverYear: {
+    fontSize: 14,
+    fontWeight: "700",
+    letterSpacing: 2,
   },
   chapterHeader: {
     marginBottom: 28,

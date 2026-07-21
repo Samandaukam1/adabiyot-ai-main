@@ -27,11 +27,25 @@ export interface ProviderData {
 }
 
 const FALLBACK_DISPLAY_NAME = "Kitobxon";
-const NATIVE_REDIRECT_URI = "rork-app://auth/callback";
+
+/**
+ * The app's own URL scheme, and the OAuth deep link the provider redirects back
+ * to on native. MUST stay in sync with `expo.scheme` in app.json — a mismatch is
+ * what silently breaks Google sign-in in a TestFlight/App Store build (the
+ * in-app browser opens, the user signs in, but the redirect never reaches us).
+ *
+ * Supabase Dashboard → Authentication → URL Configuration → Redirect URLs must
+ * allow all three of:
+ *   adabiyotx://auth/callback
+ *   https://adabiyotx.uz/auth/callback
+ *   https://www.adabiyotx.uz/auth/callback
+ */
+const APP_SCHEME = "adabiyotx";
+const AUTH_CALLBACK_PATH = "auth/callback";
 
 function getAuthRedirectUri(): string {
-  if (Platform.OS !== "web") return NATIVE_REDIRECT_URI;
-  return makeRedirectUri();
+  if (Platform.OS === "web") return makeRedirectUri({ path: AUTH_CALLBACK_PATH });
+  return makeRedirectUri({ scheme: APP_SCHEME, path: AUTH_CALLBACK_PATH });
 }
 
 function firstNonEmpty(...values: (string | null | undefined)[]): string | null {
@@ -66,32 +80,87 @@ export interface SignInResult {
 }
 
 /**
+ * Turn a raw Supabase OAuth error into a friendly, non-crashing message —
+ * chiefly for the case where the provider isn't enabled in the dashboard yet.
+ */
+function friendlyProviderError(error: unknown, label: string): Error {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/not enabled|unsupported provider|provider is not enabled|validation_failed/i.test(message)) {
+    return new Error(`${label} bilan kirish hozircha yoqilmagan. Boshqa usulni tanlang.`);
+  }
+
+  // Apple: the native id_token's `aud` claim is ALWAYS the app's bundle id
+  // (uz.adabiyotx.app). Supabase rejects it with "Unacceptable audience in
+  // id_token" until that exact bundle id is listed in
+  //   Supabase Dashboard → Authentication → Providers → Apple
+  //     → "Authorized Client IDs"  (comma-separated; add uz.adabiyotx.app)
+  // Nothing in the app can work around it, so log loudly in dev and show the
+  // user a calm, non-technical message.
+  if (/unacceptable audience|invalid audience|bad_jwt|invalid.*id_token/i.test(message)) {
+    if (__DEV__) {
+      console.error(
+        "[AppleLogin] Supabase rejected the id_token audience. Add the bundle id " +
+          "`uz.adabiyotx.app` to Supabase → Authentication → Providers → Apple → " +
+          "Authorized Client IDs, then retry.",
+        message
+      );
+    }
+    return new Error(
+      `${label} orqali kirishda xatolik yuz berdi. Iltimos, qayta urinib ko'ring.`
+    );
+  }
+
+  return error instanceof Error ? error : new Error(message);
+}
+
+/**
+ * Shared OAuth browser flow (works on native and web): ask Supabase for the
+ * provider URL, open it, then exchange the redirect for a session. Returns
+ * `null` when the user cancels. Used by Google everywhere, and by Apple on web.
+ */
+async function signInWithOAuthBrowser(
+  provider: AuthProviderId,
+  label: string,
+  queryParams?: Record<string, string>
+): Promise<SignInResult | null> {
+  const redirectTo = getAuthRedirectUri();
+  if (__DEV__) console.log(`[${label}Login] start → redirectTo`, redirectTo);
+
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider,
+    options: { redirectTo, skipBrowserRedirect: true, queryParams },
+  });
+  if (error) {
+    if (__DEV__) console.error(`[${label}Login] signInWithOAuth error`, error.message);
+    throw friendlyProviderError(error, label);
+  }
+  if (!data?.url) throw new Error(`${label} kirish manzili olinmadi`);
+
+  const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
+  if (result.type === "cancel" || result.type === "dismiss") {
+    if (__DEV__) console.log(`[${label}Login] canceled by user`);
+    return null;
+  }
+  if (result.type !== "success" || !result.url) {
+    if (__DEV__) console.error(`[${label}Login] browser session failed`, result.type);
+    throw new Error(
+      `${label} orqali kirishda xatolik yuz berdi. Iltimos, qayta urinib ko'ring.`
+    );
+  }
+
+  const session = await createSessionFromUrl(result.url);
+  if (!session) throw new Error("Sessiya yaratilmadi");
+  if (__DEV__) console.log(`[${label}Login] session created`);
+  return { session, provider };
+}
+
+/**
  * Google sign-in via Supabase OAuth + an in-app browser. No client secrets
  * live in the app — the Google provider is configured in the Supabase
  * dashboard. Returns `null` if the user cancels.
  */
 export async function signInWithGoogle(): Promise<SignInResult | null> {
-  const redirectTo = getAuthRedirectUri();
-  const { data, error } = await supabase.auth.signInWithOAuth({
-    provider: "google",
-    options: {
-      redirectTo,
-      skipBrowserRedirect: true,
-      queryParams: { prompt: "select_account" },
-    },
-  });
-  if (error) throw error;
-  if (!data?.url) throw new Error("Google kirish manzili olinmadi");
-
-  const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
-  if (result.type === "cancel" || result.type === "dismiss") return null;
-  if (result.type !== "success" || !result.url) {
-    throw new Error("Google bilan kirishda xatolik");
-  }
-
-  const session = await createSessionFromUrl(result.url);
-  if (!session) throw new Error("Sessiya yaratilmadi");
-  return { session, provider: "google" };
+  return signInWithOAuthBrowser("google", "Google", { prompt: "select_account" });
 }
 
 /** Combine the Apple name parts (only present on the first login). */
@@ -104,10 +173,17 @@ function formatAppleName(
 }
 
 /**
- * Apple sign-in via the native dialog + Supabase `signInWithIdToken`.
- * Returns `null` if the user cancels the system sheet.
+ * Apple sign-in. On the web there is no native Apple sheet, so we use the same
+ * Supabase OAuth browser flow as Google (provider `apple`). On iOS we use the
+ * native dialog + `signInWithIdToken`. Returns `null` if the user cancels.
  */
 export async function signInWithApple(): Promise<SignInResult | null> {
+  if (Platform.OS === "web") {
+    return signInWithOAuthBrowser("apple", "Apple");
+  }
+
+  if (__DEV__) console.log("[AppleLogin] start");
+
   let credential: AppleAuthentication.AppleAuthenticationCredential;
   try {
     credential = await AppleAuthentication.signInAsync({
@@ -118,20 +194,30 @@ export async function signInWithApple(): Promise<SignInResult | null> {
     });
   } catch (e) {
     // The user dismissed the Apple sheet.
-    if ((e as { code?: string }).code === "ERR_REQUEST_CANCELED") return null;
-    throw e;
+    if ((e as { code?: string }).code === "ERR_REQUEST_CANCELED") {
+      if (__DEV__) console.log("[AppleLogin] canceled by user");
+      return null;
+    }
+    if (__DEV__) console.error("[AppleLogin] signInAsync error", e);
+    throw friendlyProviderError(e, "Apple");
   }
 
   if (!credential.identityToken) {
-    throw new Error("Apple identifikatsiya tokeni olinmadi");
+    if (__DEV__) console.error("[AppleLogin] identityToken missing");
+    throw new Error("Apple orqali kirishda xatolik yuz berdi. Iltimos, qayta urinib ko'ring.");
   }
+  if (__DEV__) console.log("[AppleLogin] identityToken exists");
 
   const { data, error } = await supabase.auth.signInWithIdToken({
     provider: "apple",
     token: credential.identityToken,
   });
-  if (error) throw error;
+  if (error) {
+    if (__DEV__) console.error("[AppleLogin] signInWithIdToken error", error.message);
+    throw friendlyProviderError(error, "Apple");
+  }
   if (!data.session) throw new Error("Sessiya yaratilmadi");
+  if (__DEV__) console.log("[AppleLogin] signInWithIdToken success");
 
   return {
     session: data.session,
@@ -170,10 +256,10 @@ export async function loadProfileAfterLogin(session: Session): Promise<ProfileRo
   if (!data) throw new Error("Profil topilmadi");
 
   if (__DEV__) {
-    console.log("AUTH USER ID", session.user.id);
-    console.log("LOADED PROFILE ID", data.id);
-    console.log("LOADED PROFILE DISPLAY NAME", data.display_name);
-    console.log("LOADED PROFILE AVATAR", data.avatar_url);
+    if (__DEV__) console.log("AUTH USER ID", session.user.id);
+    if (__DEV__) console.log("LOADED PROFILE ID", data.id);
+    if (__DEV__) console.log("LOADED PROFILE DISPLAY NAME", data.display_name);
+    if (__DEV__) console.log("LOADED PROFILE AVATAR", data.avatar_url);
   }
 
   return data as ProfileRow;

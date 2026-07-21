@@ -3,6 +3,18 @@ import { resolveMediaUrl, resolveProfileAvatarUrl } from "@/lib/media";
 import { resolveBadgeType, type VerificationType } from "@/types/profile";
 
 const REELS_BUCKET = "reels";
+export const PUBLIC_REELS_PAGE_SIZE = 24;
+const USER_REELS_LIMIT = 48;
+const SAVED_REELS_LIMIT = 60;
+const REEL_COMMENTS_LIMIT = 80;
+const PUBLIC_REELS_CACHE_TTL_MS = 45_000;
+const LINKED_WORK_CACHE_TTL_MS = 5 * 60_000;
+
+interface ReelPageOptions {
+  limit?: number;
+  offset?: number;
+  force?: boolean;
+}
 
 const PUBLIC_REELS_SELECT =
   "id,user_id,video_url,thumbnail_url,title,caption,creator_name,creator_username,creator_avatar_url,creator_badge,likes_count,comments_count,saves_count,shares_count";
@@ -29,6 +41,7 @@ export interface PublicReel {
   savesCount: number;
   sharesCount: number;
   userId: string | null;
+  authorId: string | null;
   likedByMe: boolean;
   savedByMe: boolean;
   /** Moderation state — only populated by the by-user fetch (own profile). */
@@ -107,10 +120,36 @@ interface PublicProfileInfo {
   username: string | null;
   avatarUrl: string | null;
   badge: VerificationType;
+  authorId: string | null;
 }
+
+const publicReelsBaseCache = new Map<string, { rows: PublicReel[]; timestamp: number }>();
+const publicReelsBaseInflight = new Map<string, Promise<PublicReel[]>>();
+const linkedWorkCache = new Map<string, { value: ReelLinkedWork | null; timestamp: number }>();
+const linkedWorkInflight = new Map<string, Promise<ReelLinkedWork | null>>();
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function normalizePageOptions(opts?: ReelPageOptions): Required<Pick<ReelPageOptions, "limit" | "offset">> {
+  const limit = Math.max(1, Math.min(opts?.limit ?? PUBLIC_REELS_PAGE_SIZE, 60));
+  const offset = Math.max(0, opts?.offset ?? 0);
+  return { limit, offset };
+}
+
+function applyPageRange(query: any, opts?: ReelPageOptions): any {
+  const { limit, offset } = normalizePageOptions(opts);
+  return query.range(offset, offset + limit - 1);
+}
+
+function cloneReels(rows: PublicReel[]): PublicReel[] {
+  return rows.map((row) => ({ ...row }));
+}
+
+function publicReelsCacheKey(opts?: ReelPageOptions): string {
+  const { limit, offset } = normalizePageOptions(opts);
+  return `${offset}:${limit}`;
+}
 
 function normalizeCount(value: unknown): number {
   if (typeof value === "number") return Number.isFinite(value) ? value : 0;
@@ -222,6 +261,7 @@ function toPublicReel(row: Record<string, unknown>, profile?: PublicProfileInfo)
     savesCount: normalizeCount(row.saves_count),
     sharesCount: normalizeCount(row.shares_count),
     userId: normalizeString(row.user_id),
+    authorId: normalizeString(row.author_id) ?? profile?.authorId ?? null,
     likedByMe: false,
     savedByMe: false,
     status: normalizeString(row.status),
@@ -242,10 +282,13 @@ const USER_REELS_SELECT =
  */
 export async function fetchReelsByUser(
   userId: string,
-  opts?: { includeUnpublished?: boolean; currentUserId?: string | null }
+  opts?: { includeUnpublished?: boolean; currentUserId?: string | null; limit?: number }
 ): Promise<PublicReel[]> {
   const applyFilters = (q: any) => {
-    let query = q.eq("user_id", userId).order("created_at", { ascending: false });
+    let query = q
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(Math.max(1, Math.min(opts?.limit ?? USER_REELS_LIMIT, 80)));
     if (!opts?.includeUnpublished) query = query.eq("status", "approved").eq("is_published", true);
     return query;
   };
@@ -289,23 +332,44 @@ export async function fetchReelLinkedWork(
   const type = normalizeString(contentType)?.toLowerCase() ?? "book";
   if (!isUuid(id)) return null;
   const table = LINKED_WORK_TABLES[type] ?? "books";
+  const cacheKey = `${table}:${id}`;
+  const cached = linkedWorkCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp <= LINKED_WORK_CACHE_TTL_MS) {
+    return cached.value ? { ...cached.value } : null;
+  }
+  const inflight = linkedWorkInflight.get(cacheKey);
+  if (inflight) {
+    const value = await inflight;
+    return value ? { ...value } : null;
+  }
 
   const runSelect = (columns: string) =>
     (supabase as any).from(table).select(columns).eq("id", id).maybeSingle();
 
-  let { data, error } = await runSelect("id,title,cover_url,author");
-  if (error && isMissingColumnError(error)) {
-    ({ data, error } = await runSelect("id,title,cover_url"));
-  }
-  if (error || !data) return null;
+  const lookup = (async () => {
+    let { data, error } = await runSelect("id,title,cover_url,author");
+    if (error && isMissingColumnError(error)) {
+      ({ data, error } = await runSelect("id,title,cover_url"));
+    }
+    if (error || !data) return null;
 
-  return {
-    id: String(data.id),
-    contentType: type,
-    title: normalizeString(data.title) ?? "Nomsiz asar",
-    coverUrl: normalizeString(data.cover_url),
-    author: normalizeString(data.author),
-  };
+    return {
+      id: String(data.id),
+      contentType: type,
+      title: normalizeString(data.title) ?? "Nomsiz asar",
+      coverUrl: normalizeString(data.cover_url),
+      author: normalizeString(data.author),
+    };
+  })();
+
+  linkedWorkInflight.set(cacheKey, lookup);
+  try {
+    const value = await lookup;
+    linkedWorkCache.set(cacheKey, { value, timestamp: Date.now() });
+    return value ? { ...value } : null;
+  } finally {
+    linkedWorkInflight.delete(cacheKey);
+  }
 }
 
 function toReelComment(row: Record<string, unknown>, profile?: PublicProfileInfo): ReelComment | null {
@@ -390,26 +454,27 @@ async function fetchPublicProfileMap(userIds: (string | null | undefined)[]): Pr
         verification_type: normalizeString(row.verification_type),
         is_vip: row.is_vip === true,
       }),
+      authorId: normalizeString(row.author_id),
     };
     return acc;
   }, {});
 }
 
-async function fetchPublicReelsFromTable(): Promise<PublicReel[]> {
-  let { data, error } = await (supabase as any)
+async function fetchPublicReelsFromTable(opts?: ReelPageOptions): Promise<PublicReel[]> {
+  let { data, error } = await applyPageRange((supabase as any)
     .from("reels")
     .select(TABLE_REELS_SELECT)
     .eq("status", "approved")
     .eq("is_published", true)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false }), opts);
 
   if (error && isMissingColumnError(error)) {
-    const retry = await (supabase as any)
+    const retry = await applyPageRange((supabase as any)
       .from("reels")
       .select(TABLE_REELS_BASIC_SELECT)
       .eq("status", "approved")
       .eq("is_published", true)
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false }), opts);
     data = retry.data;
     error = retry.error;
   }
@@ -485,32 +550,63 @@ async function attachLinkedContent(reels: PublicReel[]): Promise<PublicReel[]> {
   });
 }
 
-export async function fetchPublicReels(userId?: string | null): Promise<PublicReel[]> {
-  let data: Record<string, unknown>[] | null = null;
-  let error: { message?: string; code?: string } | null = null;
-
-  const viewResult = await (supabase as any).from("public_reels").select(PUBLIC_REELS_SELECT);
-  if (!viewResult.error && Array.isArray(viewResult.data)) {
-    data = viewResult.data;
-  } else {
-    error = viewResult.error;
+async function fetchPublicReelsBase(opts?: ReelPageOptions): Promise<PublicReel[]> {
+  const cacheKey = publicReelsCacheKey(opts);
+  const cached = publicReelsBaseCache.get(cacheKey);
+  if (!opts?.force && cached && Date.now() - cached.timestamp <= PUBLIC_REELS_CACHE_TTL_MS) {
+    return cloneReels(cached.rows);
   }
 
-  let reels: PublicReel[];
-  if (data) {
-    reels = data
-      .map((row) => toPublicReel(row))
-      .filter((item): item is PublicReel => item !== null);
-  } else if (error && (isMissingRelationError(error) || isRlsError(error))) {
-    reels = await fetchPublicReelsFromTable();
-  } else if (error) {
-    throw error;
-  } else {
-    reels = [];
+  const inflight = publicReelsBaseInflight.get(cacheKey);
+  if (!opts?.force && inflight) {
+    return cloneReels(await inflight);
   }
 
-  reels = await attachLinkedContent(reels);
+  const request = (async () => {
+    let data: Record<string, unknown>[] | null = null;
+    let error: { message?: string; code?: string } | null = null;
 
+    const viewResult = await applyPageRange((supabase as any)
+      .from("public_reels")
+      .select(PUBLIC_REELS_SELECT)
+      .order("created_at", { ascending: false }), opts);
+    if (!viewResult.error && Array.isArray(viewResult.data)) {
+      data = viewResult.data;
+    } else {
+      error = viewResult.error;
+    }
+
+    let reels: PublicReel[];
+    if (data) {
+      reels = data
+        .map((row) => toPublicReel(row))
+        .filter((item): item is PublicReel => item !== null);
+    } else if (error && (isMissingRelationError(error) || isMissingColumnError(error) || isRlsError(error))) {
+      reels = await fetchPublicReelsFromTable(opts);
+    } else if (error) {
+      throw error;
+    } else {
+      reels = [];
+    }
+
+    reels = await attachLinkedContent(reels);
+    publicReelsBaseCache.set(cacheKey, { rows: cloneReels(reels), timestamp: Date.now() });
+    return reels;
+  })();
+
+  publicReelsBaseInflight.set(cacheKey, request);
+  try {
+    return cloneReels(await request);
+  } finally {
+    publicReelsBaseInflight.delete(cacheKey);
+  }
+}
+
+export async function fetchPublicReels(
+  userId?: string | null,
+  opts?: ReelPageOptions
+): Promise<PublicReel[]> {
+  const reels = await fetchPublicReelsBase(opts);
   const state = await fetchReelInteractionState(reels.map((reel) => reel.id), userId);
   return reels.map((reel) => ({
     ...reel,
@@ -524,7 +620,8 @@ export async function fetchSavedReels(userId: string | null | undefined): Promis
   const { data, error } = await (supabase as any)
     .from("saved_reels")
     .select("*")
-    .eq("saved_by_user_id", userId);
+    .eq("saved_by_user_id", userId)
+    .limit(SAVED_REELS_LIMIT);
   if (error || !Array.isArray(data)) {
     throw error ?? new Error("Saqlangan reels yuklanmadi");
   }
@@ -582,7 +679,8 @@ export async function fetchReelComments(reelId: string, currentUserId?: string |
     .from("reel_comments")
     .select("*")
     .eq("reel_id", reelId)
-    .order("created_at", { ascending: true });
+    .order("created_at", { ascending: true })
+    .limit(REEL_COMMENTS_LIMIT);
   if (error || !Array.isArray(data)) {
     throw error ?? new Error("Izohlar yuklanmadi");
   }
@@ -804,7 +902,7 @@ export async function submitReel(input: SubmitReelInput): Promise<SubmitReelResu
 
   const reelId = String(data.id);
   progress(100);
-  console.log("[reels] inserted row id", reelId);
+  if (__DEV__) console.log("[reels] inserted row id", reelId);
   return { id: reelId };
 }
 

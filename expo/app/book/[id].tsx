@@ -6,9 +6,8 @@ import { Redirect, router, useLocalSearchParams } from "expo-router";
 import {
   ArrowLeft,
   BookOpen,
-  Bookmark,
+  Feather,
   Headphones,
-  Share2,
   Shield,
   Star,
   Users,
@@ -32,7 +31,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { AppTheme } from "@/constants/colors";
 import { FONT, PressableScale, Screen } from "@/components/ui";
 import { books, getAuthor, getBook, getBookRoute, getPublisher, type Author, type Book } from "@/mocks/content";
-import { useApp } from "@/providers/AppProvider";
 import { usePublishedBook } from "@/hooks/usePublishedBooks";
 import RatingReviewBlock from "@/components/RatingReviewBlock";
 import BookCover from "@/components/BookCover";
@@ -50,9 +48,13 @@ import {
   usePurchaseFlow,
 } from "@/hooks/usePayments";
 import { usePromo } from "@/hooks/usePromo";
+import { useResponsive } from "@/hooks/useResponsive";
 import { useAuth } from "@/providers/AuthProvider";
+import { useAuthGate } from "@/providers/AuthGateProvider";
 import { useTheme } from "@/providers/ThemeProvider";
 import { type DisplayBook, publisherTypeLabel } from "@/types/database";
+import WebBookHero, { type WebBookHeroChip } from "@/components/web/WebBookHero";
+import { getApplicationCtaLabel, mapContentTypeToApplicationType } from "@/utils/applicationCta";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 const HERO_COVER_W = Math.min(198, Math.round(SCREEN_W * 0.48));
@@ -92,8 +94,8 @@ export default function BookDetail() {
   const { book: supabaseBook, loading: supabaseLoading } = usePublishedBook(
     mockBook ? "" : String(id ?? "")
   );
-  const { savedBookIds, toggleSaveBook } = useApp();
   const { isAuthenticated } = useAuth();
+  const { promptLogin } = useAuthGate();
   const access = useContentAccess("book", mockBook?.id);
   const purchaseFlow = usePurchaseFlow();
   const paymentProductQuery = usePaymentProduct("book", mockBook?.id);
@@ -106,6 +108,7 @@ export default function BookDetail() {
   const [showBuy, setShowBuy] = useState(false);
   const { colors: c, isDark } = useTheme();
   const styles = useMemo(() => createStyles(c, isDark), [c, isDark]);
+  const { isWebLayout } = useResponsive();
 
   const ctaGlowAnim = useRef(new Animated.Value(0)).current;
   const stickyAnim = useRef(new Animated.Value(0)).current;
@@ -205,7 +208,6 @@ export default function BookDetail() {
   const sameCategory = books.filter((b) => b.category === book.category && b.id !== book.id);
   const fallback = books.filter((b) => b.id !== book.id && b.category !== book.category);
   const related = [...sameCategory, ...fallback].slice(0, 5);
-  const saved = savedBookIds.includes(book.id);
   const purchased = book.free || access.hasAccess;
   const totalReaders = deriveTotalReaders(book, author);
   const audioDuration = deriveAudioDuration(book);
@@ -250,7 +252,7 @@ export default function BookDetail() {
   const hasLongDescription = book.description.length > 140;
   const openBuy = () => {
     if (!isAuthenticated) {
-      router.push("/auth");
+      promptLogin();
       return;
     }
     if (paymentProductQuery.isLoading || paymentProductQuery.isFetching) return;
@@ -292,6 +294,43 @@ export default function BookDetail() {
         onScroll={handleScroll}
         scrollEventThrottle={16}
       >
+        {isWebLayout ? (
+          <WebBookHero
+            cover={book.cover}
+            category={book.category}
+            title={book.title}
+            author={author?.name}
+            onAuthorPress={() => router.push(`/author/${book.authorId}`)}
+            description={book.description}
+            chips={statItems as WebBookHeroChip[]}
+            primaryLabel={book.category === "She'r" ? "She'rni o'qish" : "E-adabiyot"}
+            onPrimary={openReader}
+            audioLabel={book.audioAvailable ? "Audio talqin" : null}
+            onAudio={
+              book.audioAvailable
+                ? purchased
+                  ? () => router.push(`/audio/${book.id}`)
+                  : openBuy
+                : undefined
+            }
+            priceLabel={!purchased && !book.free ? formatPrice(bookPrice) : null}
+            onAiPress={() => router.push(`/book-ai/${book.id}`)}
+            onBack={() => router.back()}
+            headerActions={
+              <ContentHeaderActions
+                contentType="book"
+                contentId={book.id}
+                title={book.title}
+                author={author?.name}
+                cover={book.cover}
+                description={book.description}
+                c={c}
+                isDark={isDark}
+              />
+            }
+          />
+        ) : (
+          <>
         <View style={styles.heroWrap}>
           <Image
             source={{ uri: book.cover }}
@@ -311,6 +350,17 @@ export default function BookDetail() {
             <Pressable onPress={() => router.back()} style={styles.iconBtn}>
               <ArrowLeft color={c.text} size={20} />
             </Pressable>
+            <HeaderArizaButton
+              label={getApplicationCtaLabel(book.category)}
+              onPress={() =>
+                router.push({
+                  pathname: "/author-application",
+                  params: { content_type: mapContentTypeToApplicationType(book.category) },
+                })
+              }
+              styles={styles}
+              c={c}
+            />
             <ContentHeaderActions
               contentType="book"
               contentId={book.id}
@@ -394,7 +444,10 @@ export default function BookDetail() {
         </View>
 
         <JaxongirAskBar onPress={() => router.push(`/book-ai/${book.id}`)} />
+          </>
+        )}
 
+        <View style={isWebLayout ? styles.webBelow : undefined}>
         <Text style={styles.sectionTitle}>Kitob haqida</Text>
         <View style={styles.shortDescBox}>
           <Text style={styles.shortDescText} numberOfLines={descriptionExpanded ? undefined : 3}>
@@ -406,6 +459,8 @@ export default function BookDetail() {
             </Pressable>
           ) : null}
         </View>
+
+        <PublishCtaCard contentType={book.category} styles={styles} />
 
         <Text style={styles.sectionTitle}>Parcha</Text>
         <View style={styles.previewActions}>
@@ -537,6 +592,7 @@ export default function BookDetail() {
             </ScrollView>
           </>
         ) : null}
+        </View>
       </ScrollView>
       <StickyReadingCta
         visible={stickyVisible}
@@ -581,6 +637,159 @@ export default function BookDetail() {
 }
 
 type StylesType = ReturnType<typeof createStyles>;
+
+/**
+ * A single wide, white header button that invites the reader to publish their own
+ * work. Its text is typed out like on a keyboard, cycling through a few phrases
+ * (the content-specific "Menda ham roman bor", then "Siz ham asaringizni chop
+ * eting", then "Ariza qoldiring"), and a soft green light sweeps around its rim
+ * with a pulsing glow shadow. Tapping opens the application form pre-selected.
+ */
+function HeaderArizaButton({
+  label,
+  onPress,
+  styles,
+  c,
+}: {
+  label: string;
+  onPress: () => void;
+  styles: StylesType;
+  c: AppTheme;
+}) {
+  const phrases = useMemo(
+    () => [label, "Siz ham asaringizni chop eting", "Ariza qoldiring"],
+    [label]
+  );
+  const [display, setDisplay] = useState("");
+  const [phraseIdx, setPhraseIdx] = useState(0);
+  const [deleting, setDeleting] = useState(false);
+
+  // Typewriter: type → hold → erase → next phrase → repeat.
+  useEffect(() => {
+    const full = phrases[phraseIdx % phrases.length];
+    if (!deleting && display === full) {
+      const t = setTimeout(() => setDeleting(true), 1600);
+      return () => clearTimeout(t);
+    }
+    if (deleting && display === "") {
+      const t = setTimeout(() => {
+        setDeleting(false);
+        setPhraseIdx((i) => (i + 1) % phrases.length);
+      }, 350);
+      return () => clearTimeout(t);
+    }
+    const t = setTimeout(
+      () =>
+        setDisplay((d) => (deleting ? full.slice(0, d.length - 1) : full.slice(0, d.length + 1))),
+      deleting ? 34 : 62
+    );
+    return () => clearTimeout(t);
+  }, [display, deleting, phraseIdx, phrases]);
+
+  // Rotating light sweep + pulsing glow shadow + blinking caret.
+  const spin = useRef(new Animated.Value(0)).current;
+  const glow = useRef(new Animated.Value(0)).current;
+  const caret = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    const s = Animated.loop(
+      Animated.timing(spin, { toValue: 1, duration: 3600, easing: Easing.linear, useNativeDriver: true })
+    );
+    const g = Animated.loop(
+      Animated.sequence([
+        Animated.timing(glow, { toValue: 1, duration: 1100, useNativeDriver: false }),
+        Animated.timing(glow, { toValue: 0, duration: 1100, useNativeDriver: false }),
+      ])
+    );
+    const cc = Animated.loop(
+      Animated.sequence([
+        Animated.timing(caret, { toValue: 0, duration: 480, useNativeDriver: true }),
+        Animated.timing(caret, { toValue: 1, duration: 480, useNativeDriver: true }),
+      ])
+    );
+    s.start();
+    g.start();
+    cc.start();
+    return () => {
+      s.stop();
+      g.stop();
+      cc.stop();
+    };
+  }, [spin, glow, caret]);
+
+  const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
+  const shadowRadius = glow.interpolate({ inputRange: [0, 1], outputRange: [4, 13] });
+  const shadowOpacity = glow.interpolate({ inputRange: [0, 1], outputRange: [0.25, 0.7] });
+
+  return (
+    <Animated.View style={[styles.arizaShadow, { shadowRadius, shadowOpacity }]}>
+      <View style={styles.arizaFrame}>
+        <AnimatedLinearGradient
+          colors={[
+            "rgba(82,183,136,0)",
+            "rgba(82,183,136,0.9)",
+            "rgba(56,239,125,0.15)",
+            "rgba(82,183,136,0.9)",
+            "rgba(82,183,136,0)",
+          ]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={[styles.arizaSweep, { transform: [{ rotate }] }]}
+          pointerEvents="none"
+        />
+        <Pressable onPress={onPress} style={styles.headerArizaBtn} hitSlop={6} accessibilityLabel="Ariza qoldirish">
+          <Feather color={c.primary} size={15} strokeWidth={2.2} />
+          <Text style={styles.headerArizaText} numberOfLines={1}>
+            {display}
+          </Text>
+          <Animated.Text style={[styles.headerArizaCaret, { opacity: caret }]}>|</Animated.Text>
+        </Pressable>
+      </View>
+    </Animated.View>
+  );
+}
+
+/**
+ * "Menda ham … bor" — invites the reader to publish their own work of the same
+ * kind. The label adapts to the content type and tapping opens the application
+ * form pre-selected to that content_type.
+ */
+function PublishCtaCard({
+  contentType,
+  styles,
+}: {
+  contentType?: string;
+  styles: StylesType;
+}) {
+  const label = getApplicationCtaLabel(contentType);
+  return (
+    <View style={styles.publishCard}>
+      <Text style={styles.publishTitle}>Siz ham ijodkormisiz?</Text>
+      <Text style={styles.publishSub}>
+        Asaringizni AdabiyotX platformasida chop ettiring — ariza qoldiring.
+      </Text>
+      <PressableScale
+        onPress={() =>
+          router.push({
+            pathname: "/author-application",
+            params: { content_type: mapContentTypeToApplicationType(contentType) },
+          })
+        }
+        style={styles.publishBtn}
+      >
+        <LinearGradient
+          colors={["#11998E", "#38EF7D"]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={styles.publishBtnInner}
+        >
+          <MaterialCommunityIcons name="feather" size={17} color="#fff" />
+          <Text style={styles.publishBtnText}>{label}</Text>
+        </LinearGradient>
+      </PressableScale>
+    </View>
+  );
+}
 
 function StatBar({
   items,
@@ -878,8 +1087,10 @@ function SupabaseBookDetail({
 }) {
   const { colors: c, isDark } = useTheme();
   const styles = useMemo(() => createStyles(c, isDark), [c, isDark]);
+  const { isWebLayout } = useResponsive();
   const { isAuthenticated } = useAuth();
-  const access = useContentAccess("book", book.id);
+  const { promptLogin } = useAuthGate();
+  const access = useContentAccess("book", book.id, { isFree: book.isFree });
   const purchaseFlow = usePurchaseFlow();
   const paymentProductQuery = usePaymentProduct("book", book.id);
   const paymentProduct = paymentProductQuery.data ?? null;
@@ -936,19 +1147,22 @@ function SupabaseBookDetail({
   const isPoem = book.genre === "She'r" || book.contentMode === "poem";
   const canRead = hasRichContent || hasFile || book.source === "supabase";
   const purchased = book.isFree || access.hasAccess;
+  // Entitlements still in flight — we must not claim the book is unpurchased yet.
+  const checkingAccess = access.isLoading;
   const bookPrice = book.isFree ? 0 : paymentProduct?.amount_uzs ?? book.price;
   const openBuy = useCallback(() => {
     if (!isAuthenticated) {
-      router.push("/auth");
+      promptLogin();
       return;
     }
+    if (checkingAccess) return;
     if (paymentProductQuery.isLoading || paymentProductQuery.isFetching) return;
     if (!paymentProduct) {
       showMissingPaymentProductAlert();
       return;
     }
     setShowBuy(true);
-  }, [isAuthenticated, paymentProduct, paymentProductQuery.isFetching, paymentProductQuery.isLoading]);
+  }, [isAuthenticated, checkingAccess, paymentProduct, paymentProductQuery.isFetching, paymentProductQuery.isLoading, promptLogin]);
   const confirmBuy = () => {
     if (!paymentProduct) {
       setShowBuy(false);
@@ -997,6 +1211,36 @@ function SupabaseBookDetail({
         scrollEventThrottle={16}
         contentContainerStyle={{ paddingBottom: 170 }}
       >
+        {isWebLayout ? (
+          <WebBookHero
+            cover={book.cover}
+            category={book.genre}
+            title={book.title}
+            author={book.authorName}
+            description={book.description}
+            chips={supaStatItems as WebBookHeroChip[]}
+            primaryLabel={canRead ? (isPoem ? "She'rni o'qish" : "E-adabiyot") : "Tez kunda"}
+            onPrimary={canRead ? openReaderOrBuy : () => {}}
+            audioLabel={hasAudio ? "Audio talqin" : null}
+            onAudio={hasAudio ? (purchased ? () => router.push(`/audio/${book.id}`) : openBuy) : undefined}
+            priceLabel={null}
+            onAiPress={() => router.push(`/book-ai/${book.id}`)}
+            onBack={() => router.back()}
+            headerActions={
+              <ContentHeaderActions
+                contentType="book"
+                contentId={book.id}
+                title={book.title}
+                author={book.authorName}
+                cover={book.cover}
+                description={book.description}
+                c={c}
+                isDark={isDark}
+              />
+            }
+          />
+        ) : (
+          <>
         <View style={styles.heroWrap}>
           <Image
             source={{ uri: book.cover }}
@@ -1016,6 +1260,17 @@ function SupabaseBookDetail({
             <Pressable onPress={() => router.back()} style={styles.iconBtn}>
               <ArrowLeft color={c.text} size={20} />
             </Pressable>
+            <HeaderArizaButton
+              label={getApplicationCtaLabel(book.genre)}
+              onPress={() =>
+                router.push({
+                  pathname: "/author-application",
+                  params: { content_type: mapContentTypeToApplicationType(book.genre) },
+                })
+              }
+              styles={styles}
+              c={c}
+            />
             <ContentHeaderActions
               contentType="book"
               contentId={book.id}
@@ -1034,7 +1289,15 @@ function SupabaseBookDetail({
             </View>
             <Text style={styles.title}>{book.title}</Text>
             <View style={styles.byline}>
-              <Text style={styles.author}>{book.authorName}</Text>
+              <Text
+                style={styles.author}
+                onPress={() => {
+                  const target = book.authorId ?? book.authorProfileId ?? book.authorName;
+                  if (target) router.push(`/author/${encodeURIComponent(target)}` as never);
+                }}
+              >
+                {book.authorName}
+              </Text>
             </View>
           </View>
         </View>
@@ -1049,11 +1312,19 @@ function SupabaseBookDetail({
         >
           {canRead ? (
             <CtaButton
-              label={isPoem ? "She'rni o'qish" : "E-adabiyot"}
-              icon="book-open-page-variant"
-              gradient={["#11998E", "#38EF7D"]}
-              shadowColor="#11998E"
-              onPress={openReaderOrBuy}
+              label={
+                checkingAccess
+                  ? "Xarid holati tekshirilmoqda…"
+                  : purchased
+                  ? "O'qishni davom ettirish"
+                  : isPoem
+                  ? "She'rni o'qish"
+                  : "E-adabiyot"
+              }
+              icon={checkingAccess ? "progress-clock" : "book-open-page-variant"}
+              gradient={checkingAccess ? ["#94A3B8", "#CBD5E1"] : ["#11998E", "#38EF7D"]}
+              shadowColor={checkingAccess ? "#94A3B8" : "#11998E"}
+              onPress={checkingAccess ? () => {} : openReaderOrBuy}
               styles={styles}
             />
           ) : (
@@ -1065,11 +1336,23 @@ function SupabaseBookDetail({
           )}
           {hasAudio && (
             <CtaButton
-              label="Audio talqin"
-              icon="headphones"
-              gradient={["#3B6FF7", "#22D3EE"]}
-              shadowColor="#3B6FF7"
-              onPress={purchased ? () => router.push(`/audio/${book.id}`) : openBuy}
+              label={
+                checkingAccess
+                  ? "Xarid holati tekshirilmoqda…"
+                  : purchased
+                  ? "Tinglashni davom ettirish"
+                  : "Audio talqin"
+              }
+              icon={checkingAccess ? "progress-clock" : "headphones"}
+              gradient={checkingAccess ? ["#94A3B8", "#CBD5E1"] : ["#3B6FF7", "#22D3EE"]}
+              shadowColor={checkingAccess ? "#94A3B8" : "#3B6FF7"}
+              onPress={
+                checkingAccess
+                  ? () => {}
+                  : purchased
+                  ? () => router.push(`/audio/${book.id}`)
+                  : openBuy
+              }
               styles={styles}
             />
           )}
@@ -1077,7 +1360,7 @@ function SupabaseBookDetail({
 
         <JaxongirAskBar onPress={() => router.push(`/book-ai/${book.id}`)} />
 
-        {promo.isActive && !purchased && !book.isFree ? (
+        {promo.isActive && !purchased && !book.isFree && !checkingAccess ? (
           <View style={{ marginTop: 14 }}>
             <PromoPriceBlock
               isActive={promo.isActive}
@@ -1090,12 +1373,22 @@ function SupabaseBookDetail({
           </View>
         ) : null}
 
-        {!book.isFree && !purchased && (
+        {/* The buy card appears only once access is settled — a user who already
+            owns the book must never be asked to pay for it again. */}
+        {!book.isFree && checkingAccess ? (
+          <View style={[supaStyles.noContentBox, { marginTop: 14 }]}>
+            <Text style={supaStyles.noContentText}>Xarid holati tekshirilmoqda…</Text>
+          </View>
+        ) : null}
+        {!book.isFree && !purchased && !checkingAccess && (
           <PressableScale onPress={openBuy} style={{ marginTop: 14 }}>
             <CombinedPriceCard price={bookPrice} audioAvailable={hasAudio} styles={styles} c={c} />
           </PressableScale>
         )}
+          </>
+        )}
 
+        <View style={isWebLayout ? styles.webBelow : undefined}>
         <Text style={styles.sectionTitle}>Kitob haqida</Text>
         <View style={styles.shortDescBox}>
           <Text style={styles.shortDescText} numberOfLines={descExpanded ? undefined : 3}>
@@ -1108,13 +1401,23 @@ function SupabaseBookDetail({
           )}
         </View>
 
+        <PublishCtaCard contentType={book.genre} styles={styles} />
+
         {(book.authorName || book.publisherName) && (
           <>
             <Text style={styles.sectionTitle}>Muallif</Text>
             <View style={styles.infoCard}>
               <View style={styles.infoCardRow}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.authorName}>{book.authorName}</Text>
+                  <Text
+                    style={styles.authorName}
+                    onPress={() => {
+                      const target = book.authorId ?? book.authorProfileId ?? book.authorName;
+                      if (target) router.push(`/author/${encodeURIComponent(target)}` as never);
+                    }}
+                  >
+                    {book.authorName}
+                  </Text>
                   {book.publisherName ? (
                     <Text style={styles.authorMeta}>{book.publisherName}</Text>
                   ) : null}
@@ -1140,6 +1443,7 @@ function SupabaseBookDetail({
           author={book.authorName}
           coverUrl={book.cover}
         />
+        </View>
       </ScrollView>
       {canRead ? (
         <StickyReadingCta
@@ -1188,6 +1492,30 @@ function SupabaseBookDetail({
 function createStyles(c: AppTheme, isDark: boolean) {
   return StyleSheet.create({
     heroWrap: { paddingBottom: 12, minHeight: 430 },
+    // On web the descriptive sections below the cinematic hero are centred to a
+    // comfortable reading column instead of stretching edge-to-edge.
+    webBelow: { width: "100%", maxWidth: 1100, alignSelf: "center", marginTop: 10 },
+    publishCard: {
+      marginHorizontal: 20,
+      marginTop: 22,
+      padding: 18,
+      borderRadius: 20,
+      backgroundColor: isDark ? "rgba(82,183,136,0.08)" : "rgba(82,183,136,0.06)",
+      borderWidth: 1,
+      borderColor: "rgba(82,183,136,0.28)",
+    },
+    publishTitle: { color: c.text, fontSize: 16, fontWeight: "800", fontFamily: FONT.serif },
+    publishSub: { color: c.textDim, fontSize: 13, lineHeight: 19, marginTop: 6, fontWeight: "500" },
+    publishBtn: { marginTop: 14, borderRadius: 14, overflow: "hidden" },
+    publishBtnInner: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 9,
+      height: 50,
+      borderRadius: 14,
+    },
+    publishBtnText: { color: "#fff", fontSize: 15, fontWeight: "800" },
     topBar: {
       flexDirection: "row",
       justifyContent: "space-between",
@@ -1210,6 +1538,49 @@ function createStyles(c: AppTheme, isDark: boolean) {
       shadowRadius: 14,
       elevation: 3,
     },
+    // Outer layer only carries the pulsing green glow shadow (needs a shape to
+    // cast from, hence the tinted background that the frame fully covers).
+    arizaShadow: {
+      flex: 1,
+      marginHorizontal: 10,
+      height: 40,
+      borderRadius: 22,
+      backgroundColor: isDark ? "rgba(82,183,136,0.30)" : "rgba(82,183,136,0.38)",
+      shadowColor: "#52B788",
+      shadowOffset: { width: 0, height: 0 },
+      elevation: 6,
+    },
+    // Clips the rotating light sweep into the pill; the 2px padding leaves a
+    // glowing animated rim around the white button.
+    arizaFrame: {
+      flex: 1,
+      borderRadius: 22,
+      overflow: "hidden",
+      padding: 2,
+      justifyContent: "center",
+      backgroundColor: isDark ? "rgba(82,183,136,0.30)" : "rgba(82,183,136,0.38)",
+    },
+    arizaSweep: {
+      position: "absolute",
+      width: 340,
+      height: 340,
+      top: "50%",
+      left: "50%",
+      marginTop: -170,
+      marginLeft: -170,
+    },
+    headerArizaBtn: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 6,
+      borderRadius: 20,
+      paddingHorizontal: 12,
+      backgroundColor: isDark ? "rgba(28,33,40,0.96)" : "rgba(255,255,255,0.97)",
+    },
+    headerArizaText: { color: c.primary, fontSize: 13, fontWeight: "800", flexShrink: 1 },
+    headerArizaCaret: { color: c.primary, fontSize: 14, fontWeight: "700", marginLeft: -2 },
     heroInner: { alignItems: "center", paddingHorizontal: 26, marginTop: 14 },
     cover: {
       width: HERO_COVER_W,

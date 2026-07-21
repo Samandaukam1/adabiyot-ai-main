@@ -15,6 +15,7 @@ import { PressableScale } from "@/components/ui";
 import VerificationBadge from "@/components/VerificationBadge";
 import { useTheme } from "@/providers/ThemeProvider";
 import { useAuth } from "@/providers/AuthProvider";
+import { useAuthGate } from "@/providers/AuthGateProvider";
 import {
   useContentReview,
   type ContentReview,
@@ -83,6 +84,7 @@ export default function RatingReviewBlock({
   const { colors: c, isDark } = useTheme();
   const styles = useMemo(() => createStyles(c, isDark), [c, isDark]);
   const { isAuthenticated } = useAuth();
+  const { promptLogin } = useAuthGate();
   const meta = useMemo(() => ({ title, author, coverUrl }), [title, author, coverUrl]);
   const { avgRating, ratingsCount, myReview, reviews, loading, submitting, submit } = useContentReview(
     contentType,
@@ -104,7 +106,7 @@ export default function RatingReviewBlock({
   const onSubmit = async () => {
     const res = await submit({ rating, comment });
     if (res.needAuth) {
-      router.push("/auth");
+      promptLogin("Baho va fikr qoldirish uchun hisobingizga kiring yoki ro'yxatdan o'ting.");
       return;
     }
     if (res.ok) setEditing(false);
@@ -127,7 +129,10 @@ export default function RatingReviewBlock({
       </View>
 
       {!isAuthenticated ? (
-        <Pressable onPress={() => router.push("/auth")} style={styles.loginPrompt}>
+        <Pressable
+          onPress={() => promptLogin("Baho va fikr qoldirish uchun hisobingizga kiring yoki ro'yxatdan o'ting.")}
+          style={styles.loginPrompt}
+        >
           <Text style={styles.loginPromptText}>Baho berish uchun hisobingizga kiring</Text>
         </Pressable>
       ) : showForm ? (

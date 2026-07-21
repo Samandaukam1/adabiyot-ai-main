@@ -62,6 +62,19 @@ export function parseDeepLink(raw: string): { segments: string[]; query: Record<
 }
 
 /**
+ * True for an OAuth redirect coming back from Google/Apple, e.g.
+ * `adabiyotx://auth/callback#access_token=…`. These must NEVER be rewritten to a
+ * route — the tokens live in the URL and Supabase needs to read them, so the
+ * caller has to hand the link back untouched.
+ */
+export function isAuthCallbackLink(rawPath: string): boolean {
+  const raw = rawPath ?? "";
+  if (/[#&?](access_token|refresh_token|error_code)=/.test(raw)) return true;
+  const { segments } = parseDeepLink(raw);
+  return segments[0] === "auth" && segments[1] === "callback";
+}
+
+/**
  * Resolve any incoming deep-link path to an in-app route, or null to fall back.
  * Handles both `adabiyotx://open?type=..&id=..` and `adabiyotx://<type>/<id>`.
  */

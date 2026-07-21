@@ -17,7 +17,7 @@ import { cursorPointer, glassBlur, hoverTransition, softShadow } from "./webStyl
  * results. ESC or a backdrop tap closes it. Web-only.
  */
 export default function WebSearchOverlay({ onClose }: { onClose: () => void }) {
-  const { colors: L, isDark } = useTheme();
+  const { colors: L } = useTheme();
   const { books } = usePublishedBooks();
   const [query, setQuery] = useState("");
 

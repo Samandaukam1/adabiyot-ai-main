@@ -25,6 +25,8 @@ type SupabaseFetchError = {
 };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const PUBLISHED_ARTICLES_LIMIT = 120;
+const HOME_ARTICLE_CARDS_LIMIT = 24;
 
 export function useArticleContent(id: string | undefined): {
   article: DisplayArticle | null;
@@ -130,7 +132,8 @@ export function usePublishedArticles(): {
     const { data, error: viewErr } = await (supabase as any)
       .from("mobile_article_rich_content")
       .select("*")
-      .order("published_at", { ascending: false, nullsFirst: false }) as {
+      .order("published_at", { ascending: false, nullsFirst: false })
+      .limit(PUBLISHED_ARTICLES_LIMIT) as {
         data: MobileArticleRichContent[] | null;
         error: SupabaseFetchError | null;
       };
@@ -149,7 +152,8 @@ export function usePublishedArticles(): {
         .from("articles")
         .select("*")
         .eq("status", "published")
-        .order("published_at", { ascending: false, nullsFirst: false }) as {
+        .order("published_at", { ascending: false, nullsFirst: false })
+        .limit(PUBLISHED_ARTICLES_LIMIT) as {
           data: Record<string, unknown>[] | null;
           error: SupabaseFetchError | null;
         };
@@ -268,7 +272,8 @@ export function useHomeArticleCards(): {
 
     const { data, error: viewErr } = await (supabase as any)
       .from("mobile_home_article_cards")
-      .select("*") as {
+      .select("*")
+      .limit(HOME_ARTICLE_CARDS_LIMIT) as {
         data: MobileHomeArticleCard[] | null;
         error: SupabaseFetchError | null;
       };

@@ -8,6 +8,7 @@ import SettingsRow from "@/components/SettingsRow";
 import { FONT } from "@/components/ui";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { useIsAuthor } from "@/hooks/useAuthorAccount";
+import { useRestorePurchases } from "@/hooks/useRestorePurchases";
 import { useAuth } from "@/providers/AuthProvider";
 import { useJaxongirAI } from "@/providers/JaxongirAIProvider";
 import { useProfile } from "@/providers/ProfileProvider";
@@ -24,6 +25,18 @@ export default function SettingsScreen() {
   const { profile } = useProfile();
   const isAuthor = useIsAuthor();
   const phoneVerified = profile.phoneVerified;
+  const { restore, isRestoring } = useRestorePurchases();
+
+  const handleRestorePurchases = useCallback(async () => {
+    if (isRestoring) return;
+    const outcome = await restore();
+    Alert.alert(
+      outcome.status === "restored" ? "Xaridlar tiklandi" : "Xaridlarni tiklash",
+      outcome.status === "restored" && outcome.count > 0
+        ? `${outcome.message} (${outcome.count} ta asar).`
+        : outcome.message
+    );
+  }, [isRestoring, restore]);
 
   // Re-read the fresh `profiles` row on focus so the author-only "Daromadlar"
   // section reflects the live account_type / author_id, not a stale cache.
@@ -162,6 +175,20 @@ export default function SettingsScreen() {
           </>
         ) : null}
 
+        {/* ─── Ariza qoldirish (author / publishing application) ── */}
+        <Text style={styles.sectionLabel}>ADIB BO'LISH</Text>
+        <View style={styles.card}>
+          <SettingsRow
+            icon="file-document-edit-outline"
+            iconColor={c.primary}
+            iconBg={isDark ? "#162D26" : "#E8F5EE"}
+            label="Ariza qoldirish"
+            description="Asaringizni chop ettirish yoki adib bo'lish uchun"
+            onPress={() => router.push("/author-application")}
+            isLast
+          />
+        </View>
+
         {/* ─── AdabiyotX Premium ──────────────────────────────── */}
         <Text style={styles.sectionLabel}>ADABIYOTX PREMIUM</Text>
         <View style={styles.card}>
@@ -188,6 +215,18 @@ export default function SettingsScreen() {
             label="Tariflar"
             description="Premium / VIP / Ultra"
             onPress={() => router.push("/payments/tariflar")}
+          />
+          <SettingsRow
+            icon={isRestoring ? "progress-download" : "restore"}
+            iconColor="#A78BFA"
+            iconBg={isDark ? "#1A162B" : "#F5F3FF"}
+            label="Xaridlarni tiklash"
+            description={
+              isRestoring
+                ? "Tekshirilmoqda…"
+                : "Oldingi xaridlaringizni serverdan qayta yuklash"
+            }
+            onPress={handleRestorePurchases}
             isLast
           />
         </View>

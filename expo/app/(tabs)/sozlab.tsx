@@ -509,7 +509,11 @@ export default function SozLabScreen() {
       <ScrollView
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
-        contentContainerStyle={{ paddingBottom: 120 }}
+        contentContainerStyle={[
+          { paddingBottom: 120 },
+          // Web: keep the feed compact + centred instead of stretching full-width.
+          Platform.OS === "web" && { maxWidth: 620, width: "100%", alignSelf: "center", paddingHorizontal: 16 },
+        ]}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -1353,8 +1357,8 @@ function CommentSheet({
       await refreshProfileRow().catch(() => {});
     }
     if (__DEV__) {
-      console.log("COMMENT/REPLY INSERT USER ID", currentUserId);
-      console.log("PROFILE ID", me?.id);
+      if (__DEV__) console.log("COMMENT/REPLY INSERT USER ID", currentUserId);
+      if (__DEV__) console.log("PROFILE ID", me?.id);
     }
 
     const replyTo = replyTarget;

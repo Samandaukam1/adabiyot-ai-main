@@ -23,10 +23,10 @@ export function usePublishedScreenplays(): UsePublishedScreenplaysResult {
     setLoading(true);
     setError(null);
     try {
-      console.log("[usePublishedScreenplays] load start");
+      if (__DEV__) console.log("[usePublishedScreenplays] load start");
       const rows = await fetchPublishedScreenplays();
-      console.log("[usePublishedScreenplays] rows:", rows);
-      console.log("[usePublishedScreenplays] count:", rows.length);
+      if (__DEV__) console.log("[usePublishedScreenplays] rows:", rows);
+      if (__DEV__) console.log("[usePublishedScreenplays] count:", rows.length);
       if (isCancelled()) return;
       setScreenplays(rows);
     } catch (e) {

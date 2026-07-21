@@ -72,23 +72,23 @@ function resolveVideoUrl(row: any): { url: string; isTransparent: boolean } {
     //    animate, just without transparent compositing.
     if (fallback && !isWebm(fallback)) {
       const transparent = isMov(fallback) && rowTransparent;
-      console.log(
+      if (__DEV__) console.log(
         `[JaxongirAI] iOS → fallback_video_url (${isMov(fallback) ? "HEVC alpha" : "composite mp4"}): ${fallback.slice(-40)}`,
       );
       return { url: fallback, isTransparent: transparent };
     }
     // 2. processed_video_url only if it happens NOT to be WebM
     if (processed && !isWebm(processed)) {
-      console.log(`[JaxongirAI] iOS → processed_video_url (non-webm): ${processed.slice(-40)}`);
+      if (__DEV__) console.log(`[JaxongirAI] iOS → processed_video_url (non-webm): ${processed.slice(-40)}`);
       return { url: processed, isTransparent: rowTransparent };
     }
     // 3. Original upload (likely has background, but at least plays)
     if (original && !isWebm(original)) {
-      console.log(`[JaxongirAI] iOS → video_url (original): ${original.slice(-40)}`);
+      if (__DEV__) console.log(`[JaxongirAI] iOS → video_url (original): ${original.slice(-40)}`);
       return { url: original, isTransparent: false };
     }
     if (raw && !isWebm(raw)) {
-      console.log(`[JaxongirAI] iOS → raw_video_url: ${raw.slice(-40)}`);
+      if (__DEV__) console.log(`[JaxongirAI] iOS → raw_video_url: ${raw.slice(-40)}`);
       return { url: raw, isTransparent: false };
     }
     // Last resort — return something even if WebM
@@ -99,15 +99,15 @@ function resolveVideoUrl(row: any): { url: string; isTransparent: boolean } {
 
   // Android: VP9/WebM alpha is the transparent format
   if (processed) {
-    console.log(`[JaxongirAI] Android → processed_video_url (WebM): ${processed.slice(-40)}`);
+    if (__DEV__) console.log(`[JaxongirAI] Android → processed_video_url (WebM): ${processed.slice(-40)}`);
     return { url: processed, isTransparent: rowTransparent };
   }
   if (original) {
-    console.log(`[JaxongirAI] Android → video_url: ${original.slice(-40)}`);
+    if (__DEV__) console.log(`[JaxongirAI] Android → video_url: ${original.slice(-40)}`);
     return { url: original, isTransparent: false };
   }
   const fallback2 = fallback || raw;
-  console.log(`[JaxongirAI] Android → fallback: ${fallback2.slice(-40)}`);
+  if (__DEV__) console.log(`[JaxongirAI] Android → fallback: ${fallback2.slice(-40)}`);
   return { url: fallback2, isTransparent: false };
 }
 
@@ -141,7 +141,7 @@ async function doFetch(): Promise<AvatarVideoMap> {
       const r = rowToVideo(row);
       if (r) map[r.state] = r.video;
     }
-    console.log("[JaxongirAI] loaded from view:", Object.keys(map));
+    if (__DEV__) console.log("[JaxongirAI] loaded from view:", Object.keys(map));
     return map;
   }
 
@@ -164,7 +164,7 @@ async function doFetch(): Promise<AvatarVideoMap> {
   }
 
   const rows = tableRes.data ?? [];
-  console.log(
+  if (__DEV__) console.log(
     "[JaxongirAI] base table rows:",
     rows.length,
     rows.map((r: any) => `${r.video_state}(${r.status})`),
@@ -175,7 +175,7 @@ async function doFetch(): Promise<AvatarVideoMap> {
     const r = rowToVideo(row);
     if (r) map[r.state] = r.video;
   }
-  console.log("[JaxongirAI] loaded from base table:", Object.keys(map));
+  if (__DEV__) console.log("[JaxongirAI] loaded from base table:", Object.keys(map));
   return map;
 }
 

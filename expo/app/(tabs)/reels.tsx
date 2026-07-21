@@ -33,6 +33,8 @@ import {
   FlatList,
   KeyboardAvoidingView,
   Modal,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   Platform,
   Pressable,
   RefreshControl,
@@ -112,6 +114,15 @@ export default function ReelsScreen() {
   const uploadOpen = false;
   const listRef = useRef<FlatList<PublicReel>>(null);
   const viewedThisSession = useRef<Set<string>>(new Set());
+  const reelsLengthRef = useRef(0);
+  const loopedReels = useMemo(
+    () => (reels.length > 1 ? [...reels, reels[0]!] : reels),
+    [reels]
+  );
+
+  useEffect(() => {
+    reelsLengthRef.current = reels.length;
+  }, [reels.length]);
 
   const initialReelIndex = useMemo(() => {
     if (!reelId) return 0;
@@ -175,9 +186,24 @@ export default function ReelsScreen() {
 
   const onViewable = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
     if (viewableItems.length > 0 && viewableItems[0].index != null) {
-      setActiveIndex(viewableItems[0].index);
+      const rawIndex = viewableItems[0].index;
+      const reelCount = reelsLengthRef.current;
+      setActiveIndex(reelCount > 0 ? rawIndex % reelCount : 0);
     }
   }).current;
+
+  const handleMomentumScrollEnd = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (reels.length <= 1) return;
+      const rawIndex = Math.round(event.nativeEvent.contentOffset.y / itemHeight);
+      if (rawIndex < reels.length) return;
+      requestAnimationFrame(() => {
+        setActiveIndex(0);
+        listRef.current?.scrollToIndex({ index: 0, animated: false });
+      });
+    },
+    [itemHeight, reels.length]
+  );
 
   return (
     <ScreenTransitionWrapper type="right" style={{ backgroundColor: "#000" }} replayKey={replayKey}>
@@ -189,16 +215,22 @@ export default function ReelsScreen() {
         ) : (
           <FlatList
             ref={listRef}
-            data={reels}
-            keyExtractor={(item) => item.id}
+            data={loopedReels}
+            keyExtractor={(item, index) => `${item.id}:${index === reels.length ? "loop" : index}`}
             style={isWebLayout ? { width: feedWidth, height: itemHeight, flexGrow: 0 } : undefined}
             initialScrollIndex={initialReelIndex > 0 ? initialReelIndex : undefined}
             pagingEnabled
             snapToInterval={itemHeight}
             decelerationRate="fast"
+            initialNumToRender={2}
+            maxToRenderPerBatch={2}
+            windowSize={3}
+            updateCellsBatchingPeriod={80}
+            removeClippedSubviews={Platform.OS !== "web"}
             showsVerticalScrollIndicator={false}
             onViewableItemsChanged={onViewable}
             viewabilityConfig={{ itemVisiblePercentThreshold: 70 }}
+            onMomentumScrollEnd={handleMomentumScrollEnd}
             onScrollToIndexFailed={({ index }) => {
               requestAnimationFrame(() => {
                 listRef.current?.scrollToOffset({ offset: itemHeight * index, animated: false });
@@ -217,7 +249,7 @@ export default function ReelsScreen() {
             renderItem={({ item, index }) => (
               <ReelItem
                 reel={item}
-                active={index === activeIndex}
+                active={(reels.length > 0 ? index % reels.length : index) === activeIndex}
                 screenFocused={screenFocused}
                 commentsOpen={commentReel?.id === item.id}
                 isOwner={!!userId && userId === item.userId}
@@ -378,13 +410,13 @@ function ReelItem({
       try {
         player.play();
       } catch (e) {
-        console.log("[reels] play err", e);
+        if (__DEV__) console.log("[reels] play err", e);
       }
     } else {
       try {
         player.pause();
       } catch (e) {
-        console.log("[reels] pause err", e);
+        if (__DEV__) console.log("[reels] pause err", e);
       }
     }
   }, [active, screenFocused, manualPaused, player]);
@@ -482,10 +514,11 @@ function ReelItem({
   const creatorHandle = reel.creatorUsername ? `@${reel.creatorUsername}` : null;
 
   const openCreator = useCallback(() => {
-    if (reel.userId) {
-      router.push({ pathname: "/u/[id]", params: { id: reel.userId } });
+    const authorTarget = reel.authorId ?? reel.userId;
+    if (authorTarget) {
+      router.push({ pathname: "/author/[id]", params: { id: authorTarget } });
     }
-  }, [reel.userId]);
+  }, [reel.authorId, reel.userId]);
 
   // ── Gestures ───────────────────────────────────────────────────────────
   // Double-tap → like (with a heart burst). Hold RIGHT half → 2× playback,
@@ -590,7 +623,12 @@ function ReelItem({
       <GestureDetector gesture={composed}>
         <Reanimated.View style={commentsOpen ? commentVideoStyle : [StyleSheet.absoluteFillObject, videoAnimStyle]}>
           {reel.thumbnailUrl ? (
-            <Image source={{ uri: reel.thumbnailUrl }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
+            <Image
+              source={{ uri: reel.thumbnailUrl }}
+              style={StyleSheet.absoluteFillObject}
+              contentFit="cover"
+              cachePolicy="disk"
+            />
           ) : null}
           <VideoView
             style={StyleSheet.absoluteFillObject}
@@ -1559,7 +1597,7 @@ function UploadReelSheet({
         video: toAsset(video),
         thumbnail: thumbnail ? toAsset(thumbnail) : null,
       });
-      console.log("[reels] upload sheet submitted row id", inserted.id);
+      if (__DEV__) console.log("[reels] upload sheet submitted row id", inserted.id);
       setSuccess(true);
       setTitle("");
       setCaption("");

@@ -33,6 +33,8 @@ export interface AuthorRow {
   is_verified: boolean | null;
   encyclopedia_article_id: string | null;
   status: string | null;
+  linked_account_id?: string | null;
+  profile_id?: string | null;
 }
 
 /** A row of the `public.author_works` view. */
@@ -90,6 +92,9 @@ export interface LinkedAuthor {
   isVerified: boolean;
   encyclopediaEntryId: string | null;
   status: string | null;
+  linkedProfileId: string | null;
+  linkedAccountId: string | null;
+  username: string | null;
 }
 
 export interface AuthorWork {
@@ -97,6 +102,8 @@ export interface AuthorWork {
   id: string;
   title: string;
   coverUrl: string | null;
+  /** Standalone media URL for creator submissions such as monologues. */
+  mediaUrl: string | null;
   price: number;
   isFree: boolean;
   status: string;
@@ -162,6 +169,9 @@ export function mapLinkedAuthor(row: AuthorRow): LinkedAuthor {
     isVerified: row.is_verified === true,
     encyclopediaEntryId: row.encyclopedia_article_id ?? null,
     status: row.status ?? null,
+    linkedProfileId: row.linked_account_id ?? row.profile_id ?? null,
+    linkedAccountId: row.linked_account_id ?? null,
+    username: null,
   };
 }
 
@@ -173,6 +183,7 @@ export function mapAuthorWork(row: AuthorWorkRow): AuthorWork {
     id: row.id,
     title: (row.title ?? "").trim() || "Nomsiz asar",
     coverUrl: row.cover_url ?? null,
+    mediaUrl: null,
     price: 0,
     isFree: false,
     status: "published",
@@ -230,6 +241,8 @@ export function contentTypeLabel(kind: string | null | undefined): string {
       return "Ssenariy";
     case "audio":
       return "Audio";
+    case "monologue":
+      return "Monolog";
     default:
       return "Asar";
   }

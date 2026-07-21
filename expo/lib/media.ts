@@ -3,7 +3,8 @@ import { supabase } from "@/lib/supabase";
 /**
  * Resolves a stored media reference to a playable/displayable URL.
  * - Empty → null (caller decides on a fallback)
- * - Already absolute (http/https) → returned as-is
+ * - Already remote (http/https/data) → returned as-is
+ * - Device-local URI (file/content/blob/...) → null
  * - Otherwise treated as a storage path inside `bucketName` and resolved
  *   to its public URL.
  */
@@ -13,7 +14,8 @@ export function resolveMediaUrl(
 ): string | null {
   const clean = normalizeMediaRef(url);
   if (!clean) return null;
-  if (isAbsoluteMediaUrl(clean)) return clean;
+  if (isLocalMediaUri(clean)) return null;
+  if (isRemoteMediaUrl(clean)) return clean;
   try {
     return supabase.storage.from(bucketName).getPublicUrl(stripBucketPrefix(clean, bucketName)).data.publicUrl ?? null;
   } catch {
@@ -59,15 +61,6 @@ function normalizeMediaRef(value: string | null | undefined): string | null {
   const lower = clean.toLowerCase();
   if (lower === "null" || lower === "undefined" || lower === "none") return null;
   return clean.replace(/^public\//, "").replace(/^\/+/, "");
-}
-
-function isAbsoluteMediaUrl(value: string): boolean {
-  return (
-    value.startsWith("http://") ||
-    value.startsWith("https://") ||
-    value.startsWith("file://") ||
-    value.startsWith("data:")
-  );
 }
 
 /** A remote, persistable URL (http/https/data) — safe to store and display. */

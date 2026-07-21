@@ -3,16 +3,15 @@ import { Image } from "expo-image";
 import { router, usePathname } from "expo-router";
 import React from "react";
 import { Pressable, Text, View } from "react-native";
-import BrandLogo from "@/components/BrandLogo";
-import { FONT } from "@/components/ui";
 import { useResponsive } from "@/hooks/useResponsive";
 import { useBranding } from "@/providers/BrandingProvider";
+import { useJaxongirAI } from "@/providers/JaxongirAIProvider";
 import { useProfile } from "@/providers/ProfileProvider";
 import { useTheme } from "@/providers/ThemeProvider";
 import { getInitials } from "@/types/profile";
 import { useHover } from "./useHover";
 import WebSearchOverlay from "./WebSearchOverlay";
-import { cursorPointer, glassBlur, hoverTransition } from "./webStyle";
+import { cursorPointer, hoverTransition } from "./webStyle";
 
 export const WEB_HEADER_HEIGHT = 68;
 
@@ -30,10 +29,45 @@ const NAV: NavItem[] = [
   { label: "Reels", href: "/(tabs)/reels", match: "/reels" },
   { label: "Tokcha", href: "/(tabs)/tokcha", match: "/tokcha" },
   { label: "So'zlab", href: "/(tabs)/sozlab", match: "/sozlab" },
-  { label: "Adiblar", href: "/adiblar", match: "/adiblar" },
+  { label: "Ariza qoldirish", href: "/author-application", match: "/author-application" },
 ];
 
 /** The translucent rounded container that groups the nav / action clusters. */
+const UZ_MONTHS = ["yanvar", "fevral", "mart", "aprel", "may", "iyun", "iyul", "avgust", "sentyabr", "oktyabr", "noyabr", "dekabr"];
+const UZ_WEEKDAYS = ["Yakshanba", "Dushanba", "Seshanba", "Chorshanba", "Payshanba", "Juma", "Shanba"];
+
+// Live date + time pill for the header.
+function HeaderClock() {
+  const { colors: L, isDark } = useTheme();
+  const [now, setNow] = React.useState(new Date());
+  React.useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const hh = String(now.getHours()).padStart(2, "0");
+  const mm = String(now.getMinutes()).padStart(2, "0");
+  return (
+    <View
+      style={{
+        alignItems: "flex-end",
+        paddingHorizontal: 16,
+        paddingVertical: 7,
+        borderRadius: 20,
+        backgroundColor: isDark ? "rgba(255,255,255,0.05)" : "rgba(13,27,42,0.035)",
+        borderWidth: 1,
+        borderColor: L.border,
+      }}
+    >
+      <Text style={{ color: L.text, fontSize: 15, fontWeight: "800", fontVariant: ["tabular-nums"] }}>
+        {hh}:{mm}
+      </Text>
+      <Text style={{ color: L.textDim, fontSize: 10.5, fontWeight: "600", marginTop: 1 }}>
+        {UZ_WEEKDAYS[now.getDay()]}, {now.getDate()}-{UZ_MONTHS[now.getMonth()]}
+      </Text>
+    </View>
+  );
+}
+
 function pillStyle(border: string, isDark: boolean) {
   return {
     flexDirection: "row" as const,
@@ -47,12 +81,12 @@ function pillStyle(border: string, isDark: boolean) {
   };
 }
 
-function NavLink({ item, active }: { item: NavItem; active: boolean }) {
+function NavLink({ item, active, onPress }: { item: NavItem; active: boolean; onPress?: () => void }) {
   const { colors: L } = useTheme();
   const { hovered, onHoverIn, onHoverOut } = useHover();
   return (
     <Pressable
-      onPress={() => router.push(item.href as any)}
+      onPress={() => (onPress ? onPress() : router.push(item.href as any))}
       onHoverIn={onHoverIn}
       onHoverOut={onHoverOut}
       style={[
@@ -131,9 +165,11 @@ function IconButton({
  */
 export default function WebHeader() {
   const { colors: L, isDark, toggleTheme } = useTheme();
-  const { appName } = useBranding();
+  const { appName, logoSource, defaultLogoSource } = useBranding();
+  const [logoFailed, setLogoFailed] = React.useState(false);
   const { isWebLayout } = useResponsive();
   const { profile } = useProfile();
+  const { open: openJaxongirAI, isOpen: jaxongirOpen } = useJaxongirAI();
   const pathname = usePathname();
   const [searchOpen, setSearchOpen] = React.useState(false);
 
@@ -148,16 +184,9 @@ export default function WebHeader() {
       style={[
         {
           height: WEB_HEADER_HEIGHT,
-          backgroundColor: isDark ? "rgba(13,17,23,0.82)" : "rgba(255,255,255,0.85)",
-          borderBottomWidth: 1,
-          borderBottomColor: L.border,
-          shadowColor: "#000",
-          shadowOpacity: 0.06,
-          shadowRadius: 12,
-          shadowOffset: { width: 0, height: 4 },
+          backgroundColor: "transparent",
           zIndex: 100,
         },
-        glassBlur,
       ]}
     >
       <View
@@ -172,15 +201,20 @@ export default function WebHeader() {
           gap: 28,
         }}
       >
-        {/* Brand */}
+        {/* Brand — in its own pill, matching the nav / actions pills */}
         <Pressable
           onPress={() => router.push("/(tabs)")}
-          style={[{ flexDirection: "row", alignItems: "center", gap: 10 }, cursorPointer]}
+          style={[pillStyle(L.border, isDark), { paddingHorizontal: 18, paddingVertical: 7 }, cursorPointer]}
+          accessibilityLabel={appName}
         >
-          <BrandLogo variant="logo" size={34} radius={10} />
-          <Text style={{ color: L.text, fontSize: 20, fontWeight: "900", fontFamily: FONT.serif, letterSpacing: -0.4 }}>
-            {appName}
-          </Text>
+          {/* Admin-panel logo PNG (not an icon + text wordmark) */}
+          <Image
+            source={logoFailed ? defaultLogoSource : logoSource}
+            style={{ height: 38, width: 154 }}
+            contentFit="contain"
+            transition={120}
+            onError={() => setLogoFailed(true)}
+          />
         </Pressable>
 
         {/* Center nav — its own grouped pill */}
@@ -189,11 +223,17 @@ export default function WebHeader() {
             {NAV.map((item) => (
               <NavLink key={item.href + item.label} item={item} active={isActive(item.match)} />
             ))}
+            <NavLink
+              item={{ label: "Jaxongir AI", href: "", match: "__jaxongir_ai__" }}
+              active={jaxongirOpen}
+              onPress={openJaxongirAI}
+            />
           </View>
         </View>
 
-        {/* Right cluster — actions pill + a separate profile circle */}
+        {/* Right cluster — clock + actions pill + a separate profile circle */}
         <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+          <HeaderClock />
           <View style={pillStyle(L.border, isDark)}>
             <IconButton name="search-outline" onPress={() => setSearchOpen(true)} />
             <IconButton name="notifications-outline" onPress={() => router.push("/notifications")} />

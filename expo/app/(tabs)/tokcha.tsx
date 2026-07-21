@@ -4,7 +4,7 @@ import { Image } from "expo-image";
 import { router } from "expo-router";
 import {
   BookOpen,
-  Bookmark,
+  ChevronDown,
   ChevronRight,
   Clock,
   Film,
@@ -16,7 +16,7 @@ import {
   User,
   X,
 } from "lucide-react-native";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
@@ -27,6 +27,7 @@ import {
   Text,
   TextInput,
   View,
+  type ViewStyle,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { FONT, Pill, PressableScale, Screen } from "@/components/ui";
@@ -123,11 +124,9 @@ const GENRE_CONFIGS: {
   { name: "Ertak",  icon: "auto-fix",                 gradient: ["#A855F7", "#7C3AED"] },
 ];
 
-type ShelfTab = "Hammasi" | "Saqlangan" | "Sotib olingan" | "Tarix";
-const SHELF_TABS: ShelfTab[] = ["Hammasi", "Saqlangan", "Sotib olingan", "Tarix"];
-
 type Filter = "Bepul" | "Pullik" | "Audio" | "Trend" | "Yangi";
 const FILTERS: Filter[] = ["Bepul", "Pullik", "Audio", "Trend", "Yangi"];
+const TOKCHA_DISCOVER_RENDER_LIMIT = 60;
 
 export default function TokchaScreen() {
   const { isWebLayout } = useResponsive();
@@ -142,7 +141,6 @@ function MobileTokchaScreen() {
   const [q, setQ] = useState<string>("");
   const [cat, setCat] = useState<TokchaGenre | null>(null);
   const [filters, setFilters] = useState<Set<Filter>>(new Set());
-  const [shelfTab, setShelfTab] = useState<ShelfTab>("Hammasi");
   const [mode, setMode] = useState<"discover" | "shelf">("discover");
   const [searchFocused, setSearchFocused] = useState(false);
 
@@ -157,6 +155,12 @@ function MobileTokchaScreen() {
     await Promise.all([refetch(), refetchArticles(), refreshShelf(), refreshSavedReels()]);
   }, [refetch, refetchArticles, refreshSavedReels, refreshShelf]);
   const { refreshing, replayKey, onRefresh } = usePullToRefresh(handleRefresh);
+
+  const scrollRef = useRef<ScrollView>(null);
+  const reelsSectionY = useRef(0);
+  const scrollToReels = useCallback(() => {
+    scrollRef.current?.scrollTo({ y: Math.max(reelsSectionY.current - 12, 0), animated: true });
+  }, []);
 
   const handleTokchaBannerCategory = useCallback((categoryName: string) => {
     const normalized = categoryName.trim().toLowerCase();
@@ -211,6 +215,13 @@ function MobileTokchaScreen() {
     });
   }, [q, cat, filters, mode, realArticles]);
 
+  const visibleResults = useMemo(
+    () => (q.length > 0 || cat !== null || filters.size > 0
+      ? results
+      : results.slice(0, TOKCHA_DISCOVER_RENDER_LIMIT)),
+    [cat, filters.size, q.length, results]
+  );
+
   const toggleFilter = (f: Filter) => {
     setFilters((prev) => {
       const n = new Set(prev);
@@ -227,6 +238,7 @@ function MobileTokchaScreen() {
     <Screen>
       <ScreenTransitionWrapper type="up" replayKey={replayKey}>
       <ScrollView
+        ref={scrollRef}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingTop: insets.top + 12, paddingBottom: 120 }}
         keyboardShouldPersistTaps="handled"
@@ -405,7 +417,7 @@ function MobileTokchaScreen() {
                         {!isSearching && <Text style={styles.section}>Top adabiyotlar</Text>}
                         {isSearching ? (
                           <View style={{ paddingHorizontal: 16, gap: 10, marginTop: 4 }}>
-                            {results.map((b, index) => (
+                            {visibleResults.map((b, index) => (
                               <StaggeredCard key={b.id} index={index}>
                                 <PressableScale
                                   onPress={() => router.push(`/book/${b.id}`)}
@@ -465,7 +477,7 @@ function MobileTokchaScreen() {
                           </View>
                         ) : (
                           <View style={styles.grid}>
-                            {results.map((b, index) => (
+                            {visibleResults.map((b, index) => (
                               <StaggeredCard key={b.id} index={index}>
                                 <PressableScale
                                   onPress={() => router.push(`/book/${b.id}`)}
@@ -486,6 +498,11 @@ function MobileTokchaScreen() {
                                   <View style={[styles.cardInfo, { padding: 0, paddingTop: 8 }]}>
                                     <Text numberOfLines={2} style={styles.cardTitle}>{b.title}</Text>
                                     <Text numberOfLines={1} style={styles.cardAuthor}>{b.authorName}</Text>
+                                    {b.category ? (
+                                      <View style={styles.cardGenreChip}>
+                                        <Text numberOfLines={1} style={styles.cardGenreText}>{b.category}</Text>
+                                      </View>
+                                    ) : null}
                                     <View style={styles.cardMeta}>
                                       <Star color={c.gold} size={11} fill={c.gold} />
                                       <Text style={styles.cardRating}>{b.rating.toFixed(1)}</Text>
@@ -536,6 +553,13 @@ function MobileTokchaScreen() {
                 value={planned.length}
                 c={c}
               />
+              <StatCard
+                icon={<Film color="#8B5CF6" size={18} />}
+                label="Reels"
+                value={savedReels.length}
+                c={c}
+                onPress={scrollToReels}
+              />
             </View>
 
             <ShelfSection
@@ -560,13 +584,19 @@ function MobileTokchaScreen() {
               c={c}
               styles={styles}
             />
-            <SavedReelsSection
-              title="Reels"
-              reels={savedReels}
-              loading={savedReelsLoading}
-              c={c}
-              styles={styles}
-            />
+            <View
+              onLayout={(e) => {
+                reelsSectionY.current = e.nativeEvent.layout.y;
+              }}
+            >
+              <SavedReelsSection
+                title="Reels"
+                reels={savedReels}
+                loading={savedReelsLoading}
+                c={c}
+                styles={styles}
+              />
+            </View>
           </>
         )}
       </ScrollView>
@@ -582,14 +612,50 @@ function MobileTokchaScreen() {
   );
 }
 
-function StatCard({ icon, label, value, c }: { icon: React.ReactNode; label: string; value: number; c: AppTheme }) {
-  return (
-    <View style={{ flex: 1, backgroundColor: c.bgCard, padding: 14, borderRadius: 14, borderWidth: 1, borderColor: c.border, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 2 }}>
-      <View style={{ marginBottom: 8 }}>{icon}</View>
-      <Text style={{ color: c.text, fontSize: 20, fontWeight: "700" }}>{value}</Text>
-      <Text style={{ color: c.textMuted, fontSize: 11, marginTop: 2 }}>{label}</Text>
-    </View>
+function StatCard({
+  icon,
+  label,
+  value,
+  c,
+  onPress,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: number;
+  c: AppTheme;
+  onPress?: () => void;
+}) {
+  const cardStyle: ViewStyle = {
+    flex: 1,
+    backgroundColor: c.bgCard,
+    padding: 11,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: c.border,
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  };
+  const inner = (
+    <>
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        {icon}
+        {onPress ? <ChevronDown color={c.textMuted} size={14} /> : null}
+      </View>
+      <Text style={{ color: c.text, fontSize: 19, fontWeight: "700" }}>{value}</Text>
+      <Text style={{ color: c.textMuted, fontSize: 10.5, marginTop: 2 }}>{label}</Text>
+    </>
   );
+  if (onPress) {
+    return (
+      <PressableScale onPress={onPress} style={cardStyle}>
+        {inner}
+      </PressableScale>
+    );
+  }
+  return <View style={cardStyle}>{inner}</View>;
 }
 
 const SHELF_TYPE_LABEL: Record<ShelfItem["contentType"], string> = {
@@ -725,7 +791,12 @@ function SavedReelsSection({
                 style={styles.savedReelCard}
               >
                 {reel.thumbnailUrl ? (
-                  <Image source={{ uri: reel.thumbnailUrl }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
+                  <Image
+                    source={{ uri: reel.thumbnailUrl }}
+                    style={StyleSheet.absoluteFillObject}
+                    contentFit="cover"
+                    cachePolicy="disk"
+                  />
                 ) : (
                   <View style={styles.savedReelFallback}>
                     <Film color={c.primary} size={24} />
@@ -865,7 +936,12 @@ function ArticleRow({
       onPress={() => router.push({ pathname: "/article/[id]", params: { id: article.id } })}
       style={{ minHeight: 166, borderRadius: 16, backgroundColor: c.bgCard, borderWidth: 1, borderColor: c.border, flexDirection: "row", overflow: "hidden", shadowColor: "#000", shadowOpacity: 0.06, shadowRadius: 14, shadowOffset: { width: 0, height: 6 }, elevation: 3 }}
     >
-      <Image source={{ uri: article.cover }} style={{ width: 116, minHeight: 166, backgroundColor: c.bgElevated }} contentFit="cover" />
+      <Image
+        source={{ uri: article.cover }}
+        style={{ width: 116, minHeight: 166, backgroundColor: c.bgElevated }}
+        contentFit="cover"
+        cachePolicy="disk"
+      />
       <View style={{ flex: 1, padding: 13 }}>
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
           <Text style={{ color: c.primary, fontSize: 10, fontWeight: "900", textTransform: "uppercase", letterSpacing: 0.8 }}>{article.category}</Text>
@@ -1074,6 +1150,21 @@ function createStyles(c: AppTheme, isDark: boolean) {
     cardInfo: { padding: 10 },
     cardTitle: { color: c.text, fontSize: 13, fontWeight: "700", marginBottom: 3 },
     cardAuthor: { color: c.textDim, fontSize: 11, marginBottom: 6 },
+    cardGenreChip: {
+      alignSelf: "flex-start",
+      backgroundColor: c.soft,
+      borderRadius: 6,
+      paddingHorizontal: 7,
+      paddingVertical: 2,
+      marginBottom: 6,
+    },
+    cardGenreText: {
+      color: c.primary,
+      fontSize: 9.5,
+      fontWeight: "800",
+      textTransform: "uppercase",
+      letterSpacing: 0.4,
+    },
     cardMeta: { flexDirection: "row", alignItems: "center", gap: 5 },
     cardRating: { color: c.gold, fontSize: 11, fontWeight: "600", flex: 1 },
     cardPrice: { color: c.secondary, fontSize: 11, fontWeight: "600" },

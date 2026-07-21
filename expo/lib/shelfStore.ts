@@ -151,6 +151,8 @@ function mergeByKey(remote: ShelfItem[], local: ShelfItem[]): {
   return { merged, localOnly };
 }
 
+const SHELF_SYNC_LIMIT = 200;
+
 async function mergeRemote(userId: string) {
   try {
     const [readingRes, plannedRes] = await Promise.all([
@@ -158,12 +160,14 @@ async function mergeRemote(userId: string) {
         .from("reading_progress")
         .select("*")
         .eq("user_id", userId)
-        .order("updated_at", { ascending: false }),
+        .order("updated_at", { ascending: false })
+        .limit(SHELF_SYNC_LIMIT),
       (supabase as any)
         .from("planned_reads")
         .select("*")
         .eq("user_id", userId)
-        .order("created_at", { ascending: false }),
+        .order("created_at", { ascending: false })
+        .limit(SHELF_SYNC_LIMIT),
     ]);
 
     if (isMissingTable(readingRes.error) && isMissingTable(plannedRes.error)) return;

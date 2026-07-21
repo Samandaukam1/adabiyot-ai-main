@@ -1,16 +1,14 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import type {
-  BookContentBlock,
-  BookTocItem,
-  MobileBook,
-  SupabasePoem,
-  SupabaseBook,
-} from "@/types/database";
 import {
   mobileBookToDisplay,
   poemToDisplay,
   type DisplayBook,
+  type BookContentBlock,
+  type BookTocItem,
+  type MobileBook,
+  type SupabasePoem,
+  type SupabaseBook,
 } from "@/types/database";
 
 interface UseBookContentResult {
@@ -21,6 +19,32 @@ interface UseBookContentResult {
   /** Human-readable error for book fetch failure only. Empty blocks is NOT an error. */
   error: string | null;
   debugInfo: { bookId: string; bookSource: string; bookError: string | null } | null;
+}
+
+const BOOK_CONTENT_CACHE_TTL_MS = 5 * 60_000;
+
+type BookContentCachePayload = {
+  book: DisplayBook;
+  blocks: BookContentBlock[];
+  tocItems: BookTocItem[];
+  debugInfo: NonNullable<UseBookContentResult["debugInfo"]>;
+};
+
+const bookContentCache = new Map<string, { payload: BookContentCachePayload; timestamp: number }>();
+
+function cloneBookContentPayload(payload: BookContentCachePayload): BookContentCachePayload {
+  return {
+    book: { ...payload.book },
+    blocks: payload.blocks.slice(),
+    tocItems: payload.tocItems.slice(),
+    debugInfo: { ...payload.debugInfo },
+  };
+}
+
+function getFreshBookContentCache(bookId: string): BookContentCachePayload | null {
+  const cached = bookContentCache.get(bookId);
+  if (!cached || Date.now() - cached.timestamp > BOOK_CONTENT_CACHE_TTL_MS) return null;
+  return cloneBookContentPayload(cached.payload);
 }
 
 /**
@@ -52,15 +76,26 @@ export function useBookContent(bookId: string): UseBookContentResult {
       return;
     }
 
+    const cached = getFreshBookContentCache(bookId);
+    if (cached) {
+      setBook(cached.book);
+      setBlocks(cached.blocks);
+      setTocItems(cached.tocItems);
+      setDebugInfo(cached.debugInfo);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
     let cancelled = false;
     setLoading(true);
     setError(null);
     setDebugInfo(null);
 
-    console.log("📖 useBookContent: starting fetch for bookId =", bookId);
+    if (__DEV__) console.log("📖 useBookContent: starting fetch for bookId =", bookId);
     if (__DEV__) {
-      console.log("🔌 SUPABASE URL EXISTS:", !!process.env.EXPO_PUBLIC_SUPABASE_URL);
-      console.log("🔌 SUPABASE KEY EXISTS:", !!process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY);
+      if (__DEV__) console.log("🔌 SUPABASE URL EXISTS:", !!process.env.EXPO_PUBLIC_SUPABASE_URL);
+      if (__DEV__) console.log("🔌 SUPABASE KEY EXISTS:", !!process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY);
     }
 
     async function run() {
@@ -79,7 +114,7 @@ export function useBookContent(bookId: string): UseBookContentResult {
       if (cancelled) return;
 
       if (!viewErr && viewData) {
-        console.log("✅ useBookContent: book found in mobile_books view");
+        if (__DEV__) console.log("✅ useBookContent: book found in mobile_books view");
         resolvedBook = mobileBookToDisplay(viewData);
         bookSource = "mobile_books";
       } else {
@@ -103,7 +138,7 @@ export function useBookContent(bookId: string): UseBookContentResult {
         if (cancelled) return;
 
         if (!pubErr && pubData) {
-          console.log("✅ useBookContent: book found in books table (status=published)");
+          if (__DEV__) console.log("✅ useBookContent: book found in books table (status=published)");
           resolvedBook = rawBookToDisplay(pubData);
           bookSource = "books_published";
         } else {
@@ -128,7 +163,7 @@ export function useBookContent(bookId: string): UseBookContentResult {
           if (cancelled) return;
 
           if (!poemErr && poemData) {
-            console.log("✅ useBookContent: poem found in poems table (status=published)");
+            if (__DEV__) console.log("✅ useBookContent: poem found in poems table (status=published)");
             resolvedBook = poemToDisplay(poemData);
             bookSource = "poems_published";
           } else {
@@ -142,7 +177,7 @@ export function useBookContent(bookId: string): UseBookContentResult {
 
           // 1d. Dev fallback — any status (lets you preview drafts in development)
           if (!resolvedBook && __DEV__) {
-            console.log("🔍 useBookContent: trying books table without status filter (dev only)…");
+            if (__DEV__) console.log("🔍 useBookContent: trying books table without status filter (dev only)…");
             const { data: anyData, error: anyErr } = await (supabase as any)
               .from("books")
               .select("*")
@@ -152,7 +187,7 @@ export function useBookContent(bookId: string): UseBookContentResult {
             if (cancelled) return;
 
             if (!anyErr && anyData) {
-              console.log("✅ useBookContent: book found in books table (any status). status =", anyData.status);
+              if (__DEV__) console.log("✅ useBookContent: book found in books table (any status). status =", anyData.status);
               resolvedBook = rawBookToDisplay(anyData);
               bookSource = `books_any(status=${anyData.status})`;
             } else if (anyErr) {
@@ -180,7 +215,7 @@ export function useBookContent(bookId: string): UseBookContentResult {
         return;
       }
 
-      console.log("📘 LOADED BOOK:", {
+      if (__DEV__) console.log("📘 LOADED BOOK:", {
         id: resolvedBook.id,
         title: resolvedBook.title,
         status: resolvedBook.status,
@@ -204,7 +239,7 @@ export function useBookContent(bookId: string): UseBookContentResult {
 
       if (cancelled) return;
 
-      console.log("📚 BOOK BLOCKS RESULT:", {
+      if (__DEV__) console.log("📚 BOOK BLOCKS RESULT:", {
         count: blocksData?.length ?? 0,
         sample: blocksData?.slice(0, 3),
         blocksError: blocksErr ?? null,
@@ -242,7 +277,7 @@ export function useBookContent(bookId: string): UseBookContentResult {
 
       if (cancelled) return;
 
-      console.log("📑 BOOK TOC RESULT:", {
+      if (__DEV__) console.log("📑 BOOK TOC RESULT:", {
         count: tocData?.length ?? 0,
         sample: tocData?.slice(0, 5),
         tocError: tocErr ?? null,
@@ -261,10 +296,18 @@ export function useBookContent(bookId: string): UseBookContentResult {
 
       // ── 4. Commit state ───────────────────────────────────────────────────
 
-      setBook(resolvedBook);
-      setBlocks(blocksData ?? []);
-      setTocItems(tocData ?? []);
-      setDebugInfo({ bookId, bookSource, bookError: null });
+      const payload: BookContentCachePayload = {
+        book: resolvedBook,
+        blocks: blocksData ?? [],
+        tocItems: tocData ?? [],
+        debugInfo: { bookId, bookSource, bookError: null },
+      };
+      bookContentCache.set(bookId, { payload: cloneBookContentPayload(payload), timestamp: Date.now() });
+
+      setBook(payload.book);
+      setBlocks(payload.blocks);
+      setTocItems(payload.tocItems);
+      setDebugInfo(payload.debugInfo);
       setLoading(false);
     }
 
@@ -284,10 +327,15 @@ function rawBookToDisplay(sb: SupabaseBook): DisplayBook {
     id: sb.id,
     title: sb.title || "Nomsiz kitob",
     authorName: sb.author || "Noma'lum muallif",
+    authorId: sb.author_id ?? null,
+    authorProfileId: sb.author_profile_id ?? null,
     publisherName: sb.publisher || "",
     publisherType: sb.publisher_type ?? null,
     cover: sb.cover_url || "",
     genre: sb.genre || "Kitob",
+    genreId: sb.genre_id ?? null,
+    category: sb.category ?? null,
+    categoryId: sb.category_id ?? null,
     description: sb.description || "",
     audioUrl: sb.audio_url ?? null,
     fileUrl: sb.file_url ?? null,

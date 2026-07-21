@@ -5,8 +5,10 @@ import {
   ArrowLeft,
   BookOpen,
   List,
+  Lock,
   Search,
   Settings,
+  ShoppingBag,
   X,
 } from "lucide-react-native";
 import React, {
@@ -35,7 +37,6 @@ import {
   ViewToken,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Lock, ShoppingBag } from "lucide-react-native";
 import { FONT } from "@/components/ui";
 import { palette } from "@/constants/colors";
 import { useBookContent } from "@/hooks/useBookContent";
@@ -43,7 +44,20 @@ import { useContentAccess } from "@/hooks/usePayments";
 import { useApp } from "@/providers/AppProvider";
 import { recordReading } from "@/lib/shelfStore";
 import { scopedKey } from "@/lib/userStorage";
+import PageFlipEffect from "@/components/reader/PageFlipEffect";
+import GitHubPageCurlEffect from "@/components/reader/GitHubPageCurlEffect";
+import ReaderTitlePage from "@/components/reader/ReaderTitlePage";
+import { useBranding } from "@/providers/BrandingProvider";
 import type { BlockType, BookContentBlock, BookTocItem } from "@/types/database";
+
+// Book-like page-flip animation over the existing paged reader. Flip to `false`
+// to instantly restore the classic swipe pager (also auto-falls back on web or
+// if the effect errors).
+const ENABLE_PAGE_FLIP = true;
+// Which flip engine: "github" keeps the real book-fold curl; the vendored
+// engine below is tuned to stay responsive on long books.
+const PAGE_FLIP_ENGINE = "github" as "github" | "smooth";
+const FlipEngine = PAGE_FLIP_ENGINE === "github" ? GitHubPageCurlEffect : PageFlipEffect;
 
 // ─── Theme ───────────────────────────────────────────────────────────────────
 
@@ -122,6 +136,31 @@ function sanitizeMarkers(text: string): string {
     .join("\n");
 }
 
+/** Normalise a heading/title string for comparison: drop markdown/markers,
+ *  punctuation and case so "# Sensiz avgust o'tmadi…" == "Sensiz avgust o'tmadi". */
+function normalizeTitleForMatch(text: string): string {
+  return text
+    .replace(/^[#>*\s]+/, "")
+    .replace(/^%%%+\s*/, "")
+    .replace(/^\^\^\^+\s*/, "")
+    .replace(/[.…·:;!?"'“”‘’]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+/** True when the reader's FIRST content block is just the book title repeated —
+ *  so we hide it (the branding title page already shows the title). */
+function firstBlockDuplicatesTitle(block: BookContentBlock | undefined, bookTitle: string): boolean {
+  if (!block || !bookTitle) return false;
+  const raw = block.title ?? block.content ?? "";
+  if (!raw.trim()) return false;
+  const a = normalizeTitleForMatch(raw);
+  const b = normalizeTitleForMatch(bookTitle);
+  if (!a || !b) return false;
+  return a === b || a.startsWith(b) || b.startsWith(a);
+}
+
 function parseCleanedContent(content: string): BookContentBlock[] {
   const lines = content.split("\n");
   const blocks: BookContentBlock[] = [];
@@ -190,6 +229,8 @@ interface ReaderPage {
   blocks: BookContentBlock[];
   pageIndex: number;
   isCover?: boolean;
+  /** Synthetic branding/title page shown as the very first page (page 0). */
+  isTitle?: boolean;
 }
 
 /** Ekran o'lchamiga asoslangan sahifalash konfiguratsiyasi */
@@ -414,7 +455,7 @@ interface BlockProps {
   highlighted: boolean;
 }
 
-const ChapterBlock = memo(({ block, fontSize, fontFamily, theme, highlighted }: BlockProps) => {
+const ChapterBlock = memo(function ChapterBlock({ block, fontSize, fontFamily, theme, highlighted }: BlockProps) {
   const title = block.title
     ? sanitizeMarkers(block.title)
     : block.content
@@ -446,7 +487,7 @@ const ChapterBlock = memo(({ block, fontSize, fontFamily, theme, highlighted }: 
   );
 });
 
-const TopicBlock = memo(({ block, fontSize, fontFamily, theme, highlighted }: BlockProps) => {
+const TopicBlock = memo(function TopicBlock({ block, fontSize, fontFamily, theme, highlighted }: BlockProps) {
   const title = block.title
     ? sanitizeMarkers(block.title)
     : block.content
@@ -477,7 +518,7 @@ const TopicBlock = memo(({ block, fontSize, fontFamily, theme, highlighted }: Bl
   );
 });
 
-const ParagraphBlock = memo(({ block, fontSize, fontFamily, theme }: BlockProps) => {
+const ParagraphBlock = memo(function ParagraphBlock({ block, fontSize, fontFamily, theme }: BlockProps) {
   const text = block.content ? sanitizeMarkers(block.content) : "";
   if (!text) return null;
   return (
@@ -497,7 +538,7 @@ const ParagraphBlock = memo(({ block, fontSize, fontFamily, theme }: BlockProps)
   );
 });
 
-const QuoteBlock = memo(({ block, fontSize, fontFamily, theme }: BlockProps) => {
+const QuoteBlock = memo(function QuoteBlock({ block, fontSize, fontFamily, theme }: BlockProps) {
   const text = block.content ? sanitizeMarkers(block.content) : "";
   const title = block.title ? sanitizeMarkers(block.title) : null;
   return (
@@ -1015,6 +1056,31 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
   const theme = THEMES[readerTheme];
   const fontSize = 16 * fontScale;
 
+  // Real (active) reader file — helps confirm which reader is on screen.
+  useEffect(() => {
+    if (__DEV__) console.log("[Reader] ACTIVE FILE:", "components/reader/RichBlockReader.tsx");
+  }, []);
+
+  // Branding logo comes ONLY from the admin Branding settings (never a bundled
+  // "mutolaa"/static asset). Priority: logo → splash → app icon → text fallback.
+  const { branding, appName } = useBranding();
+  const brandingLogoUrl =
+    branding.logo_url || branding.splash_logo_url || branding.app_icon_url || null;
+
+  // Publication year: prefer a real date field, else omit (never "current year").
+  const bookYear = useMemo(() => {
+    const raw = book as unknown as Record<string, unknown> | null;
+    const candidate =
+      (raw?.publicationYear as string | number | undefined) ??
+      (raw?.publication_year as string | number | undefined) ??
+      (raw?.year as string | number | undefined) ??
+      (raw?.publishedAt as string | undefined) ??
+      (raw?.published_at as string | undefined) ??
+      (book?.createdAt as string | undefined);
+    const match = candidate != null ? String(candidate).match(/\d{4}/) : null;
+    return match ? match[0] : null;
+  }, [book]);
+
   // Determine effective blocks (DB blocks → cleaned_content fallback → empty).
   // Yirik ko'p-paragrafli bloklarni ham normalizatsiya qilamiz.
   const blocks = useMemo<BookContentBlock[]>(() => {
@@ -1024,8 +1090,14 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
         : book?.cleanedContent
         ? parseCleanedContent(book.cleanedContent)
         : [];
-    return normalizeParagraphBlocks(source);
-  }, [rawBlocks, book?.cleanedContent]);
+    const normalized = normalizeParagraphBlocks(source);
+    // The branding title page already shows the title, so drop a leading block
+    // that is just the book title repeated (e.g. "# Sensiz avgust o'tmadi…").
+    if (book?.title && firstBlockDuplicatesTitle(normalized[0], book.title)) {
+      return normalized.slice(1);
+    }
+    return normalized;
+  }, [rawBlocks, book?.cleanedContent, book?.title]);
 
   // Paid-content gating: a paid book the user doesn't own shows only a ~1/4
   // preview ("parcha") then a paywall. Free/owned books read in full.
@@ -1068,12 +1140,39 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
     return { availableH, lineH, charsPerLine };
   }, [fontSize, PAGE_TOP, PAGE_BOT]);
 
-  // Bloklarni sahifalarga guruhlash. Muqova birinchi sahifaga MAJBURAN
-  // qo'yilmaydi — kitob to'g'ridan-to'g'ri matndan boshlanadi.
-  const pages = useMemo<ReaderPage[]>(
-    () => groupBlocksIntoPages(blocks, paginationConfig),
-    [blocks, paginationConfig]
-  );
+  // Bloklarni sahifalarga guruhlash. Eng birinchi sahifa — branding title page
+  // (logo · nom · muallif · yil). pageIndex === massiv indeksi bo'lib qoladi, shu
+  // sabab scroll/TOC/anchor/progress hammasi to'g'ri ishlaydi.
+  const pages = useMemo<ReaderPage[]>(() => {
+    const content = groupBlocksIntoPages(blocks, paginationConfig);
+    if (content.length === 0) return content;
+    const titlePage: ReaderPage = {
+      id: "reader-title-page",
+      blocks: [],
+      pageIndex: 0,
+      isTitle: true,
+    };
+    return [titlePage, ...content].map((page, index) => ({ ...page, pageIndex: index }));
+  }, [blocks, paginationConfig]);
+
+  // Diagnostics: which reader branch wins + whether the page-flip pager renders.
+  useEffect(() => {
+    const willRenderPager = !accessResolving && !isPaidLocked && blocks.length > 0;
+    if (__DEV__) console.log("[RichReader] gate:", {
+      readingMode,
+      pagesLen: pages.length,
+      blocksLen: blocks.length,
+      accessResolving,
+      isPaidLocked,
+      willRenderPager,
+    });
+    if (willRenderPager && readingMode === "paged") {
+      if (__DEV__) console.log("[RichReader] rendering PageFlipEffect");
+      if (__DEV__) console.log("[RichReader] ENABLE_PAGE_FLIP:", ENABLE_PAGE_FLIP);
+      if (__DEV__) console.log("[RichReader] platform:", Platform.OS);
+      if (__DEV__) console.log("[RichReader] pages length:", pages.length);
+    }
+  }, [readingMode, pages.length, blocks.length, accessResolving, isPaidLocked]);
 
   // anchor_id → blok indeksi (uzluksiz scroll rejimi uchun)
   const anchorIndexMap = useMemo<Record<string, number>>(() => {
@@ -1145,7 +1244,7 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
             setShowResume(true);
           }
         }
-      } catch (_) {}
+      } catch {}
     }
     load();
   }, [bookId]);
@@ -1167,12 +1266,20 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
     Animated.timing(uiAnim, { toValue: next ? 1 : 0, duration: 220, useNativeDriver: true }).start();
   }, [uiAnim]);
 
+  // Page-flip owns clean taps while active. Keeping page Pressables passive in
+  // this mode prevents a swipe from also toggling the top/bottom chrome.
+  const usingFlip = ENABLE_PAGE_FLIP && Platform.OS !== "web" && pages.length > 0;
+
   const scrollToPage = useCallback(
     (pageIndex: number, animated = true) => {
       if (pageIndex < 0 || pageIndex >= pages.length) return;
+      // Drive the controlled index too so jumps (TOC / resume / search) also work
+      // when the page-flip wrapper is active (it has no FlatList ref to scroll).
+      // Harmless in classic mode: the FlatList scroll + viewability set the same index.
+      setCurrentPageIndex(pageIndex);
       try {
         flatListRef.current?.scrollToIndex({ index: pageIndex, animated, viewPosition: 0 });
-      } catch (_) {
+      } catch {
         flatListRef.current?.scrollToOffset({ offset: pageIndex * SCREEN_W, animated });
       }
     },
@@ -1205,6 +1312,18 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
         if (idx > 0) {
           AsyncStorage.setItem(STORAGE_POS_PREFIX + bookId, String(idx)).catch(() => {});
         }
+      }
+    },
+    [bookId]
+  );
+
+  // Page-flip → page change. Same effect as onPagedViewableItemsChanged so the
+  // current page + saved reading position behave identically to the classic pager.
+  const handleFlipPageChange = useCallback(
+    (idx: number) => {
+      setCurrentPageIndex(idx);
+      if (idx > 0) {
+        AsyncStorage.setItem(STORAGE_POS_PREFIX + bookId, String(idx)).catch(() => {});
       }
     },
     [bookId]
@@ -1243,6 +1362,29 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
 
   const renderItem = useCallback(
     ({ item: page }: { item: ReaderPage }) => {
+      // Branding title page (logo · nom · muallif · yil). Same Pressable wrapper
+      // as content pages, so tap-to-toggle controls behaves identically.
+      if (page.isTitle) {
+        return (
+          <Pressable
+            style={[pgStyles.page, { width: SCREEN_W, backgroundColor: theme.paper, paddingTop: 0, paddingBottom: 0 }]}
+            onPress={usingFlip ? undefined : toggleUI}
+          >
+            <ReaderTitlePage
+              logoUrl={brandingLogoUrl}
+              appName={appName}
+              title={book?.title ?? ""}
+              authorName={book?.authorName ?? null}
+              year={bookYear}
+              category={book?.genre ?? null}
+              backgroundColor={theme.paper}
+              textColor={theme.text}
+              mutedColor={theme.textMuted}
+              accentColor={theme.accent}
+            />
+          </Pressable>
+        );
+      }
       // Bob boshlanayotgan sahifada birinchi paragraph indeksini topamiz (drop cap uchun)
       const startsWithChapter = page.blocks[0]?.block_type === "chapter";
       const firstParaIdx = startsWithChapter
@@ -1254,7 +1396,7 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
         // paddingTop/Bottom: barlar ko'rinsin-ko'rinmasin, matn har doim shu oraliqda
         <Pressable
           style={[pgStyles.page, { width: SCREEN_W, backgroundColor: theme.paper, paddingTop: PAGE_TOP, paddingBottom: PAGE_BOT }]}
-          onPress={toggleUI}
+          onPress={usingFlip ? undefined : toggleUI}
         >
           <View style={pgStyles.content}>
             {page.blocks.map((block, idx) => {
@@ -1343,7 +1485,7 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
         </Pressable>
       );
     },
-    [book, fontSize, fontFamily, theme, highlightedAnchorId, PAGE_TOP, PAGE_BOT]
+    [book, fontSize, fontFamily, theme, highlightedAnchorId, PAGE_TOP, PAGE_BOT, brandingLogoUrl, appName, bookYear, toggleUI, usingFlip]
   );
 
   // Uzluksiz scroll rejimi uchun renderItem (blok bazali)
@@ -1485,23 +1627,33 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
     <View style={[rStyles.fill, { backgroundColor: theme.paper }]}>
       {/* Kontent — to'liq balandlik, barlar ustidan overlay qilinadi */}
       {readingMode === "paged" ? (
-        <FlatList
-          ref={flatListRef}
-          data={pages}
-          keyExtractor={keyExtractor}
-          renderItem={renderItem}
-          horizontal
-          pagingEnabled
-          showsHorizontalScrollIndicator={false}
-          initialNumToRender={3}
-          windowSize={3}
-          maxToRenderPerBatch={2}
-          removeClippedSubviews={Platform.OS !== "web"}
-          onViewableItemsChanged={onPagedViewableItemsChanged}
-          viewabilityConfig={viewabilityConfig}
-          onScrollToIndexFailed={handleScrollToIndexFailed}
-          getItemLayout={(_data, index) => ({ length: SCREEN_W, offset: SCREEN_W * index, index })}
-          style={{ flex: 1 }}
+        <FlipEngine
+          enabled={ENABLE_PAGE_FLIP}
+          pages={pages}
+          currentPage={currentPageIndex}
+          onPageChange={handleFlipPageChange}
+          onTap={toggleUI}
+          renderPage={renderItem}
+          fallback={
+            <FlatList
+              ref={flatListRef}
+              data={pages}
+              keyExtractor={keyExtractor}
+              renderItem={renderItem}
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              initialNumToRender={3}
+              windowSize={3}
+              maxToRenderPerBatch={2}
+              removeClippedSubviews={Platform.OS !== "web"}
+              onViewableItemsChanged={onPagedViewableItemsChanged}
+              viewabilityConfig={viewabilityConfig}
+              onScrollToIndexFailed={handleScrollToIndexFailed}
+              getItemLayout={(_data, index) => ({ length: SCREEN_W, offset: SCREEN_W * index, index })}
+              style={{ flex: 1 }}
+            />
+          }
         />
       ) : (
         <FlatList
@@ -1509,11 +1661,22 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
           data={blocks}
           keyExtractor={keyExtractorVert}
           renderItem={renderVertItem}
-          contentContainerStyle={{ paddingTop: insets.top + 64, paddingBottom: insets.bottom + 48, backgroundColor: theme.paper }}
+          contentContainerStyle={{ paddingBottom: insets.bottom + 48, backgroundColor: theme.paper }}
           ListHeaderComponent={
-            book.cover ? (
-              <Image source={{ uri: book.cover }} style={{ width: SCREEN_W, height: SCREEN_W * 1.4 }} contentFit="cover" />
-            ) : null
+            <View style={{ height: SCREEN_H - (insets.top + insets.bottom), paddingTop: insets.top + 64 }}>
+              <ReaderTitlePage
+                logoUrl={brandingLogoUrl}
+                appName={appName}
+                title={book.title}
+                authorName={book.authorName ?? null}
+                year={bookYear}
+                category={book.genre ?? null}
+                backgroundColor={theme.paper}
+                textColor={theme.text}
+                mutedColor={theme.textMuted}
+                accentColor={theme.accent}
+              />
+            </View>
           }
           initialNumToRender={20}
           windowSize={5}

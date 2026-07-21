@@ -16,6 +16,46 @@ interface UsePublishedBooksResult {
   refetch: () => Promise<void>;
 }
 
+const PUBLISHED_CONTENT_LIMIT = 240;
+const PUBLISHED_POEMS_LIMIT = 120;
+const PUBLISHED_BOOKS_CACHE_TTL_MS = 60_000;
+
+type PublishedBooksPayload = {
+  rows: DisplayBook[];
+  error: string | null;
+};
+
+let publishedBooksCache: { payload: PublishedBooksPayload; timestamp: number } | null = null;
+let publishedBooksInflight: Promise<PublishedBooksPayload> | null = null;
+
+function getFreshPublishedBooksCache(force?: boolean): PublishedBooksPayload | null {
+  if (force || !publishedBooksCache) return null;
+  if (Date.now() - publishedBooksCache.timestamp > PUBLISHED_BOOKS_CACHE_TTL_MS) return null;
+  return {
+    rows: publishedBooksCache.payload.rows.slice(),
+    error: publishedBooksCache.payload.error,
+  };
+}
+
+async function getPublishedBooksPayload(force?: boolean): Promise<PublishedBooksPayload> {
+  const fresh = getFreshPublishedBooksCache(force);
+  if (fresh) return fresh;
+
+  if (!publishedBooksInflight) {
+    publishedBooksInflight = loadPublishedBooks().then((payload) => {
+      publishedBooksCache = {
+        payload: { rows: payload.rows.slice(), error: payload.error },
+        timestamp: Date.now(),
+      };
+      return payload;
+    }).finally(() => {
+      publishedBooksInflight = null;
+    });
+  }
+
+  return publishedBooksInflight;
+}
+
 /**
  * Fetches published books using a two-step strategy:
  * 1. Try `mobile_books` view (rich data, strict status filter)
@@ -23,93 +63,38 @@ interface UsePublishedBooksResult {
  *    books where submission_status hasn't been set yet by the admin)
  */
 export function usePublishedBooks(): UsePublishedBooksResult {
-  const [books, setBooks] = useState<DisplayBook[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const cached = getFreshPublishedBooksCache();
+  const [books, setBooks] = useState<DisplayBook[]>(() => cached?.rows ?? []);
+  const [loading, setLoading] = useState(() => !cached);
+  const [error, setError] = useState<string | null>(() => cached?.error ?? null);
 
-  const fetchBooks = useCallback(async (isCancelled: () => boolean = () => false) => {
-    setLoading(true);
-    setError(null);
-
-    // ── Step 1: try the mobile_books view ─────────────────────────────────
-    const { data: viewData, error: viewErr } = await (supabase as any)
-      .from("mobile_books")
-      .select("*") as {
-        data: MobileBook[] | null;
-        error: { message: string; code: string; details: string; hint: string } | null;
-      };
-
-    if (isCancelled()) return;
-
-    if (viewErr) {
-      console.error("[Supabase] mobile_books fetch error:", {
-        message: viewErr.message,
-        code: viewErr.code,
-        details: viewErr.details,
-        hint: viewErr.hint,
-      });
-    }
-
-    let bookRows: DisplayBook[] = !viewErr && viewData && viewData.length > 0
-      ? viewData.map(mobileBookToDisplay)
-      : [];
-    let bookFetchError: string | null = null;
-
-    // ── Step 2: fall back to books table with status='published' ──────────
-    if (bookRows.length === 0 && __DEV__) {
-      console.log(
-        "[Supabase] mobile_books empty or errored — trying books table directly"
-      );
-    }
-
-    if (bookRows.length === 0) {
-      const { data: tableData, error: tableErr } = await (supabase as any)
-        .from("books")
-        .select("*")
-        .eq("status", "published")
-        .order("published_at", { ascending: false, nullsFirst: false })
-        .order("created_at", { ascending: false }) as {
-          data: SupabaseBook[] | null;
-          error: { message: string; code: string; details: string; hint: string } | null;
-        };
-
-      if (isCancelled()) return;
-
-      if (tableErr) {
-        console.error("[Supabase] books table fetch error:", {
-          message: tableErr.message,
-          code: tableErr.code,
-          details: tableErr.details,
-          hint: tableErr.hint,
-        });
-        bookFetchError = tableErr.message;
-      } else if (tableData && tableData.length > 0) {
-        bookRows = tableData.map(rawBookToDisplay);
-      }
-    }
-
-    const { rows: poemRows, error: poemFetchError } = await fetchPublishedPoems();
-
-    if (isCancelled()) return;
-
-    const mergedRows = sortByCreatedAt([...bookRows, ...poemRows]);
-
-    if (mergedRows.length === 0) {
-      if (__DEV__) {
-        console.log(
-          "[Supabase] No published books or poems found, showing empty state."
-        );
-      }
-      if (bookFetchError && poemFetchError) {
-        setError("Materiallarni yuklashda xatolik yuz berdi.");
-      }
-      setBooks([]);
+  const fetchBooks = useCallback(async (
+    isCancelled: () => boolean = () => false,
+    opts?: { force?: boolean }
+  ) => {
+    const fresh = getFreshPublishedBooksCache(opts?.force);
+    if (fresh) {
+      setBooks(fresh.rows);
+      setError(fresh.error);
       setLoading(false);
       return;
     }
 
-    setBooks(mergedRows);
-    setLoading(false);
+    setLoading(true);
+    setError(null);
+
+    try {
+      const payload = await getPublishedBooksPayload(opts?.force);
+      if (isCancelled()) return;
+      setBooks(payload.rows);
+      setError(payload.error);
+    } catch (err) {
+      if (isCancelled()) return;
+      setBooks([]);
+      setError(err instanceof Error ? err.message : "Materiallarni yuklashda xatolik yuz berdi.");
+    } finally {
+      if (!isCancelled()) setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -121,7 +106,7 @@ export function usePublishedBooks(): UsePublishedBooksResult {
     };
   }, [fetchBooks]);
 
-  const refetch = useCallback(() => fetchBooks(), [fetchBooks]);
+  const refetch = useCallback(() => fetchBooks(undefined, { force: true }), [fetchBooks]);
 
   return {
     books,
@@ -129,6 +114,75 @@ export function usePublishedBooks(): UsePublishedBooksResult {
     error,
     refetch,
   };
+}
+
+async function loadPublishedBooks(): Promise<PublishedBooksPayload> {
+  // ── Step 1: try the mobile_books view ─────────────────────────────────
+  const { data: viewData, error: viewErr } = await (supabase as any)
+    .from("mobile_books")
+    .select("*")
+    .order("published_at", { ascending: false, nullsFirst: false })
+    .limit(PUBLISHED_CONTENT_LIMIT) as {
+      data: MobileBook[] | null;
+      error: { message: string; code: string; details: string; hint: string } | null;
+    };
+
+  if (viewErr && __DEV__) {
+    console.warn("[Supabase] mobile_books unavailable; falling back to books table:", {
+      message: viewErr.message,
+      code: viewErr.code,
+      details: viewErr.details,
+      hint: viewErr.hint,
+    });
+  }
+
+  let bookRows: DisplayBook[] = !viewErr && viewData && viewData.length > 0
+    ? viewData.map(mobileBookToDisplay)
+    : [];
+  let bookFetchError: string | null = null;
+
+  // ── Step 2: fall back to books table with status='published' ──────────
+  if (bookRows.length === 0 && __DEV__) {
+    console.warn("[Supabase] mobile_books empty or unavailable — trying books table directly");
+  }
+
+  if (bookRows.length === 0) {
+    const { data: tableData, error: tableErr } = await (supabase as any)
+      .from("books")
+      .select("*")
+      .eq("status", "published")
+      .order("published_at", { ascending: false, nullsFirst: false })
+      .order("created_at", { ascending: false })
+      .limit(PUBLISHED_CONTENT_LIMIT) as {
+        data: SupabaseBook[] | null;
+        error: { message: string; code: string; details: string; hint: string } | null;
+      };
+
+    if (tableErr) {
+      console.error("[Supabase] books table fetch error:", {
+        message: tableErr.message,
+        code: tableErr.code,
+        details: tableErr.details,
+        hint: tableErr.hint,
+      });
+      bookFetchError = tableErr.message;
+    } else if (tableData && tableData.length > 0) {
+      bookRows = tableData.map(rawBookToDisplay);
+    }
+  }
+
+  const { rows: poemRows, error: poemFetchError } = await fetchPublishedPoems();
+  const mergedRows = sortByCreatedAt([...bookRows, ...poemRows]).slice(0, PUBLISHED_CONTENT_LIMIT);
+
+  if (mergedRows.length === 0) {
+    if (__DEV__) console.log("[Supabase] No published books or poems found, showing empty state.");
+    return {
+      rows: [],
+      error: bookFetchError && poemFetchError ? "Materiallarni yuklashda xatolik yuz berdi." : null,
+    };
+  }
+
+  return { rows: mergedRows, error: null };
 }
 
 export function usePublishedBook(id: string): {
@@ -228,7 +282,8 @@ async function fetchPublishedPoems(): Promise<{
     .select("*")
     .eq("status", "published")
     .order("published_at", { ascending: false, nullsFirst: false })
-    .order("created_at", { ascending: false }) as {
+    .order("created_at", { ascending: false })
+    .limit(PUBLISHED_POEMS_LIMIT) as {
       data: SupabasePoem[] | null;
       error: SupabaseFetchError | null;
     };
@@ -260,10 +315,15 @@ function rawBookToDisplay(sb: SupabaseBook): DisplayBook {
     id: sb.id,
     title: sb.title || "Nomsiz kitob",
     authorName: sb.author || "Noma'lum muallif",
+    authorId: sb.author_id ?? null,
+    authorProfileId: sb.author_profile_id ?? null,
     publisherName: sb.publisher || "Noma'lum nashriyot",
     publisherType: sb.publisher_type ?? null,
     cover: sb.cover_url || "",
     genre: sb.genre || "Kitob",
+    genreId: sb.genre_id ?? null,
+    category: sb.category ?? null,
+    categoryId: sb.category_id ?? null,
     description: sb.description || "",
     audioUrl: sb.audio_url ?? null,
     fileUrl: sb.file_url ?? null,

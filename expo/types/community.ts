@@ -1,19 +1,29 @@
-/** Adib (writer) encyclopedia entry — maps to `mobile_adib_encyclopedia` view. */
+/** Published Adiblar ensiklopediyasi entry returned by the public RPCs. */
 export interface AdibEntry {
   id: string;
   fullName: string;
   penName: string | null;
-  avatarUrl: string | null;
+  adabiyotxUsername: string | null;
+  telegramUsername: string | null;
+  photoUrl: string | null;
+  coverUrl: string | null;
+  roles: string[];
   shortDescription: string | null;
-  biography: string | null;
-  education: string | null;
-  activity: string | null;
-  worksSummary: string | null;
-  achievements: string | null;
-  quotes: string[];
-  sources: string[];
-  featured: boolean;
+  biographyMarkdown: string | null;
+  biographyHtml: string | null;
+  birthDate: string | null;
   birthYear: string | null;
+  birthPlace: string | null;
+  nationality: string | null;
+  profession: string | null;
+  specialty: string | null;
+  partyAffiliation: string | null;
+  languages: string[];
+  quickFacts: Record<string, unknown>;
+  sections: Record<string, unknown>;
+  socialLinks: Record<string, unknown>;
+  publishedAt: string | null;
+  sortOrder: number;
 }
 
 /** Loosely-typed raw row so we can defensively map varying view column names. */
@@ -42,22 +52,61 @@ function strList(row: RawRow, ...keys: string[]): string[] {
   return [];
 }
 
+function object(row: RawRow, ...keys: string[]): Record<string, unknown> {
+  for (const k of keys) {
+    const value = row[k];
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      return value as Record<string, unknown>;
+    }
+    if (typeof value === "string" && value.trim()) {
+      try {
+        const parsed = JSON.parse(value) as unknown;
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          return parsed as Record<string, unknown>;
+        }
+      } catch {
+        // Keep the mapper tolerant of legacy non-JSON text values.
+      }
+    }
+  }
+  return {};
+}
+
+function number(row: RawRow, ...keys: string[]): number {
+  for (const k of keys) {
+    const value = row[k];
+    const parsed = typeof value === "number" ? value : Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
+}
+
 export function mapAdibEntry(row: RawRow): AdibEntry {
   return {
-    id: str(row, "id", "adib_id", "slug") ?? Math.random().toString(36).slice(2),
+    id: str(row, "id", "adib_id", "slug") ?? "",
     fullName: str(row, "full_name", "name", "title") ?? "Noma'lum adib",
     penName: str(row, "pen_name", "penname", "taxallus", "alias"),
-    avatarUrl: str(row, "avatar_url", "photo_url", "image_url", "photo", "avatar"),
+    adabiyotxUsername: str(row, "adabiyotx_username", "username"),
+    telegramUsername: str(row, "telegram_username"),
+    photoUrl: str(row, "photo_url", "avatar_url", "image_url", "photo", "avatar"),
+    coverUrl: str(row, "cover_url"),
+    roles: strList(row, "roles", "role_labels"),
     shortDescription: str(row, "short_description", "summary", "subtitle", "tagline"),
-    biography: str(row, "biography", "bio", "life", "description"),
-    education: str(row, "education", "studies"),
-    activity: str(row, "activity", "career", "faoliyat"),
-    worksSummary: str(row, "works_summary", "works", "asarlar"),
-    achievements: str(row, "achievements", "awards", "yutuqlar"),
-    quotes: strList(row, "quotes", "famous_quotes", "iqtiboslar"),
-    sources: strList(row, "sources", "references", "manbalar"),
-    featured: row["featured"] === true || row["is_featured"] === true,
+    biographyMarkdown: str(row, "biography_markdown", "biography", "bio"),
+    biographyHtml: str(row, "biography_html"),
+    birthDate: str(row, "birth_date"),
     birthYear: str(row, "birth_year", "born", "tugilgan_yil"),
+    birthPlace: str(row, "birth_place"),
+    nationality: str(row, "nationality"),
+    profession: str(row, "profession"),
+    specialty: str(row, "specialty"),
+    partyAffiliation: str(row, "party_affiliation"),
+    languages: strList(row, "languages"),
+    quickFacts: object(row, "quick_facts"),
+    sections: object(row, "sections"),
+    socialLinks: object(row, "social_links"),
+    publishedAt: str(row, "published_at"),
+    sortOrder: number(row, "sort_order"),
   };
 }
 

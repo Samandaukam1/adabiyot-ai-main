@@ -94,6 +94,7 @@ export interface DisplayArticle {
   slug?: string | null;
   title: string;
   author: string;
+  authorProfileId: string | null;
   authorRole: string;
   category: ArticleCategory;
   cover: string;
@@ -196,6 +197,7 @@ export function mobileArticleToDisplay(row: MobileArticleRichContent): DisplayAr
     // This legacy view has no admin-assigned author, so the author row is
     // hidden on the read page (never show "AdabiyotX muallifi").
     author: "",
+    authorProfileId: null,
     authorRole: "",
     category: inferCategory(row),
     cover: firstNonEmptyString(row.cover_url, DEFAULT_ARTICLE_COVER),
@@ -248,6 +250,7 @@ export function mobileReadPageToDisplay(row: MobileArticleReadPage): DisplayArti
     slug: row.slug,
     title: safeText(row.title, "Nomsiz maqola"),
     author: authorName,
+    authorProfileId: row.author_user_id ?? null,
     authorRole: firstNonEmptyString(row.author_role),
     category: inferCategory(row as unknown as MobileArticleRichContent),
     cover: firstNonEmptyString(row.cover_url, DEFAULT_ARTICLE_COVER),
@@ -317,6 +320,7 @@ export function mobileHomeCardToDisplay(row: MobileHomeArticleCard): HomeArticle
 export function legacyArticleToDisplay(article: Article): DisplayArticle {
   return {
     ...article,
+    authorProfileId: null,
     slug: null,
     blocks: article.blocks.map(normalizeLegacyBlock),
     contentSource: "legacy",

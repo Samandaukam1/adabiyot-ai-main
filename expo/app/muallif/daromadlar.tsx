@@ -1,17 +1,21 @@
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import {
+  AlertCircle,
+  BadgeCheck,
+  CheckCircle2,
   ChevronLeft,
   Clock3,
   RefreshCw,
-  TrendingUp,
-  Wallet,
-  BadgeCheck,
   ShoppingBag,
-  CheckCircle2,
+  TrendingUp,
+  UserX,
+  Wallet,
 } from "lucide-react-native";
 import React, { useMemo } from "react";
 import {
+  ActivityIndicator,
+  Alert,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -22,21 +26,41 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { AppTheme } from "@/constants/colors";
 import { FONT, PressableScale } from "@/components/ui";
 import { formatUzs } from "@/constants/tariffs";
-import { useAuthorEarnings } from "@/hooks/useAuthorAccount";
+import { useEffectiveAuthorId, useIsAuthor } from "@/hooks/useAuthorAccount";
+import { useAuthorRoyalty } from "@/hooks/useAuthorRoyalty";
 import { useTheme } from "@/providers/ThemeProvider";
 import {
   contentRoute,
   contentTypeLabel,
-  earningStatusMeta,
   formatSaleDateTime,
-  type AuthorEarning,
 } from "@/types/author";
+import {
+  ledgerTypeMeta,
+  payoutStatusLabel,
+  type RoyaltyLedgerEntry,
+} from "@/types/authorRoyalty";
 
 export default function AuthorEarningsScreen() {
   const insets = useSafeAreaInsets();
   const { colors: c, isDark } = useTheme();
   const styles = useMemo(() => createStyles(c, isDark), [c, isDark]);
-  const { summary, rows, loading, error, refetch } = useAuthorEarnings();
+  const isAuthor = useIsAuthor();
+  // Don't flash "muallif emas" while the authors→account reverse link is
+  // still being resolved for accounts without profiles.author_id.
+  const { loading: authorResolving } = useEffectiveAuthorId();
+  const {
+    summary,
+    ledger,
+    loading,
+    error,
+    refetch,
+    hasComplaint,
+    submitComplaint,
+    submittingLedgerId,
+  } = useAuthorRoyalty();
+  // Prefer the summary's count; fall back to counting loaded sale ledger rows.
+  const salesCount =
+    summary.salesCount || ledger.filter((entry) => entry.transactionType === "sale").length;
   const [refreshing, setRefreshing] = React.useState(false);
 
   const onRefresh = React.useCallback(async () => {
@@ -47,6 +71,39 @@ export default function AuthorEarningsScreen() {
       setRefreshing(false);
     }
   }, [refetch]);
+
+  const onComplain = React.useCallback(
+    (entry: RoyaltyLedgerEntry) => {
+      Alert.alert(
+        "Shikoyat yuborish",
+        "“Menga hali pul yetib kelmadi” shikoyati admin panelga yuborilsinmi?",
+        [
+          { text: "Bekor qilish", style: "cancel" },
+          {
+            text: "Yuborish",
+            onPress: () => {
+              submitComplaint(entry.id)
+                .then(() => {
+                  Alert.alert(
+                    "Yuborildi",
+                    "Shikoyatingiz admin panelga yuborildi. Tez orada ko'rib chiqiladi."
+                  );
+                })
+                .catch((err: unknown) => {
+                  Alert.alert(
+                    "Xatolik",
+                    err instanceof Error
+                      ? err.message
+                      : "Shikoyat yuborilmadi. Qayta urinib ko'ring."
+                  );
+                });
+            },
+          },
+        ]
+      );
+    },
+    [submitComplaint]
+  );
 
   return (
     <View style={{ flex: 1, backgroundColor: c.bg }}>
@@ -73,91 +130,120 @@ export default function AuthorEarningsScreen() {
           />
         }
       >
-        {/* ─── HERO — umumiy daromad ─────────────────────────────── */}
-        <LinearGradient
-          colors={isDark ? ["#12352A", "#1B4D3A", "#0F2C22"] : ["#2D9B6F", "#1F8A5F", "#0F7A52"]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.hero}
-        >
-          <View style={styles.heroTopRow}>
-            <View style={styles.heroIcon}>
-              <TrendingUp color="#fff" size={18} strokeWidth={2.4} />
-            </View>
-            <View style={styles.sharePill}>
-              <BadgeCheck color="#fff" size={13} />
-              <Text style={styles.sharePillText}>Muallif ulushi 50%</Text>
-            </View>
-          </View>
-          <Text style={styles.heroLabel}>Umumiy daromad</Text>
-          {loading ? (
-            <View style={styles.heroSkeleton} />
+        {!isAuthor ? (
+          authorResolving ? (
+            <ActivityIndicator color={c.primary} style={{ marginTop: 60 }} />
           ) : (
-            <Text style={styles.heroValue}>{formatUzs(summary.totalEarned)}</Text>
-          )}
-          <Text style={styles.heroSub}>Sizning asarlaringizdan tushgan ulush</Text>
-
-          <View style={styles.heroDivider} />
-
-          <View style={styles.heroBalanceRow}>
-            <HeroBalance label="Mavjud balans" value={formatUzs(summary.availableBalance)} accent="#B9F6CA" loading={loading} />
-            <View style={styles.heroBalanceDiv} />
-            <HeroBalance label="Kutilayotgan" value={formatUzs(summary.pendingAmount)} accent="#FFE0A3" loading={loading} />
-            <View style={styles.heroBalanceDiv} />
-            <HeroBalance label="To'langan" value={formatUzs(summary.paidOutAmount)} accent="#BBDEFB" loading={loading} />
-          </View>
-        </LinearGradient>
-
-        {/* ─── STAT CARDS ────────────────────────────────────────── */}
-        <View style={styles.statGrid}>
-          <StatCard
-            c={c}
-            styles={styles}
-            icon={<ShoppingBag color="#2D9B6F" size={18} strokeWidth={2.2} />}
-            tint={isDark ? "rgba(45,155,111,0.14)" : "#E8F5EE"}
-            label="Jami sotuvlar"
-            value={loading ? "—" : String(summary.salesCount)}
-          />
-          <StatCard
-            c={c}
-            styles={styles}
-            icon={<ShoppingBag color="#F4A261" size={18} strokeWidth={2.2} />}
-            tint={isDark ? "rgba(244,162,97,0.14)" : "#FFF4E8"}
-            label="Umumiy savdo"
-            value={loading ? "—" : formatUzs(summary.grossTotal)}
-          />
-          <StatCard
-            c={c}
-            styles={styles}
-            icon={<Wallet color="#38BDF8" size={18} strokeWidth={2.2} />}
-            tint={isDark ? "rgba(56,189,248,0.14)" : "#EAF6FF"}
-            label="Sizning ulushingiz"
-            value={loading ? "—" : formatUzs(summary.totalEarned)}
-          />
-        </View>
-
-        {/* ─── SOTUVLAR TARIXI ───────────────────────────────────── */}
-        <View style={styles.historyHeader}>
-          <Text style={styles.sectionTitle}>Sotuvlar tarixi</Text>
-          <Text style={styles.sectionHint}>Har bir sotuvdan 50% muallif ulushi</Text>
-        </View>
-
-        {error ? (
-          <ErrorState c={c} styles={styles} onRetry={onRefresh} />
-        ) : loading ? (
-          <View style={{ gap: 12, paddingHorizontal: 20 }}>
-            <RowSkeleton styles={styles} />
-            <RowSkeleton styles={styles} />
-            <RowSkeleton styles={styles} />
-          </View>
-        ) : rows.length === 0 ? (
-          <EmptyState c={c} styles={styles} />
+            <NotAuthorState c={c} styles={styles} />
+          )
         ) : (
-          <View style={{ gap: 12, paddingHorizontal: 20 }}>
-            {rows.map((row) => (
-              <EarningRow key={row.id} row={row} c={c} styles={styles} />
-            ))}
-          </View>
+          <>
+            {/* ─── HERO — mavjud balans ──────────────────────────── */}
+            <LinearGradient
+              colors={isDark ? ["#12352A", "#1B4D3A", "#0F2C22"] : ["#2D9B6F", "#1F8A5F", "#0F7A52"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.hero}
+            >
+              <View style={styles.heroTopRow}>
+                <View style={styles.heroIcon}>
+                  <Wallet color="#fff" size={18} strokeWidth={2.4} />
+                </View>
+                <View style={styles.sharePill}>
+                  <BadgeCheck color="#fff" size={13} />
+                  <Text style={styles.sharePillText}>
+                    Muallif ulushi {Math.round(summary.royaltyPercent)}%
+                  </Text>
+                </View>
+              </View>
+              <Text style={styles.heroLabel}>Mavjud balans</Text>
+              {loading ? (
+                <View style={styles.heroSkeleton} />
+              ) : (
+                <Text style={styles.heroValue}>{formatUzs(summary.availableBalance)}</Text>
+              )}
+              <Text style={styles.heroSub}>
+                Asarlaringiz sotuvidan hali to'lanmagan ulushingiz
+              </Text>
+
+              <View style={styles.heroDivider} />
+
+              <View style={styles.heroBalanceRow}>
+                <HeroBalance
+                  label="Jami topilgan"
+                  value={formatUzs(summary.totalEarned)}
+                  accent="#B9F6CA"
+                  loading={loading}
+                />
+                <View style={styles.heroBalanceDiv} />
+                <HeroBalance
+                  label="Jami to'langan"
+                  value={formatUzs(summary.totalPaid)}
+                  accent="#BBDEFB"
+                  loading={loading}
+                />
+                <View style={styles.heroBalanceDiv} />
+                <HeroBalance
+                  label="Shu yil to'landi"
+                  value={formatUzs(summary.paidThisYear)}
+                  accent="#FFE0A3"
+                  loading={loading}
+                />
+              </View>
+            </LinearGradient>
+
+            {/* ─── STAT CARDS ────────────────────────────────────── */}
+            <View style={styles.statGrid}>
+              <StatCard
+                styles={styles}
+                icon={<TrendingUp color="#2D9B6F" size={18} strokeWidth={2.2} />}
+                tint={isDark ? "rgba(45,155,111,0.14)" : "#E8F5EE"}
+                label="Jami ishlab topilgan"
+                value={loading ? "—" : formatUzs(summary.totalEarned)}
+              />
+              <StatCard
+                styles={styles}
+                icon={<ShoppingBag color="#8B5CF6" size={18} strokeWidth={2.2} />}
+                tint={isDark ? "rgba(139,92,246,0.14)" : "#F1ECFE"}
+                label="Sotuvlar soni"
+                value={loading ? "—" : String(salesCount)}
+              />
+            </View>
+
+            {/* ─── DAROMADLAR TARIXI ─────────────────────────────── */}
+            <View style={styles.historyHeader}>
+              <Text style={styles.sectionTitle}>Daromadlar tarixi</Text>
+              <Text style={styles.sectionHint}>
+                Sotuvlar, to'lovlar va tuzatishlar — barchasi bitta ro'yxatda
+              </Text>
+            </View>
+
+            {error ? (
+              <ErrorState c={c} styles={styles} onRetry={onRefresh} />
+            ) : loading ? (
+              <View style={{ gap: 12, paddingHorizontal: 20 }}>
+                <RowSkeleton styles={styles} />
+                <RowSkeleton styles={styles} />
+                <RowSkeleton styles={styles} />
+              </View>
+            ) : ledger.length === 0 ? (
+              <EmptyState c={c} styles={styles} />
+            ) : (
+              <View style={{ gap: 12, paddingHorizontal: 20 }}>
+                {ledger.map((entry) => (
+                  <LedgerRow
+                    key={entry.id}
+                    entry={entry}
+                    c={c}
+                    styles={styles}
+                    complained={hasComplaint(entry.id)}
+                    submitting={submittingLedgerId === entry.id}
+                    onComplain={() => onComplain(entry)}
+                  />
+                ))}
+              </View>
+            )}
+          </>
         )}
       </ScrollView>
     </View>
@@ -195,14 +281,12 @@ const hbStyles = StyleSheet.create({
 });
 
 function StatCard({
-  c,
   styles,
   icon,
   tint,
   label,
   value,
 }: {
-  c: AppTheme;
   styles: ReturnType<typeof createStyles>;
   icon: React.ReactNode;
   tint: string;
@@ -222,25 +306,45 @@ function StatCard({
   );
 }
 
-function EarningRow({
-  row,
+function LedgerRow({
+  entry,
   c,
   styles,
+  complained,
+  submitting,
+  onComplain,
 }: {
-  row: AuthorEarning;
+  entry: RoyaltyLedgerEntry;
   c: AppTheme;
   styles: ReturnType<typeof createStyles>;
+  complained: boolean;
+  submitting: boolean;
+  onComplain: () => void;
 }) {
-  const meta = earningStatusMeta(row.status);
-  const onPress = row.contentId
-    ? () => router.push(contentRoute(row.contentType, row.contentId as string) as never)
-    : undefined;
+  const meta = ledgerTypeMeta(entry.transactionType, entry.royaltyAmount);
+  const isPayout = entry.transactionType === "payout";
+  const isSale = entry.transactionType === "sale";
+  const disputed = entry.payoutStatus === "disputed" || complained;
+  const disputedLabel =
+    payoutStatusLabel(entry.payoutStatus) ?? (complained ? "Shikoyat yuborildi" : null);
+  const amount = Math.abs(entry.royaltyAmount);
+  const when = isPayout
+    ? entry.payoutDate ?? entry.createdAt
+    : entry.createdAt;
+  const title =
+    entry.contentTitle ??
+    entry.description ??
+    (isPayout ? "Muallifga to'lov" : meta.label);
+  const onPress =
+    isSale && entry.contentId
+      ? () => router.push(contentRoute(entry.contentType, entry.contentId as string) as never)
+      : undefined;
 
   return (
     <PressableScale onPress={onPress} style={styles.row}>
       <View style={styles.rowTop}>
         <Text style={styles.rowTitle} numberOfLines={1}>
-          {row.contentTitle}
+          {title}
         </Text>
         <View style={[styles.statusPill, { backgroundColor: meta.bg }]}>
           <Text style={[styles.statusText, { color: meta.color }]}>{meta.label}</Text>
@@ -248,35 +352,77 @@ function EarningRow({
       </View>
 
       <View style={styles.rowMetaLine}>
-        <View style={styles.typeBadge}>
-          <Text style={styles.typeBadgeText}>{contentTypeLabel(row.contentType)}</Text>
-        </View>
+        {entry.contentType ? (
+          <View style={styles.typeBadge}>
+            <Text style={styles.typeBadgeText}>{contentTypeLabel(entry.contentType)}</Text>
+          </View>
+        ) : null}
         <Clock3 color={c.textMuted} size={12} />
-        <Text style={styles.rowDate}>{formatSaleDateTime(row.soldAt)}</Text>
+        <Text style={styles.rowDate}>{formatSaleDateTime(when)}</Text>
       </View>
 
-      <View style={styles.rowAmountBox}>
-        <View style={styles.rowAmountItem}>
-          <Text style={styles.rowAmountLabel}>Sotuv</Text>
-          <Text style={styles.rowAmountValue}>{formatUzs(row.saleAmountUzs)}</Text>
-        </View>
-        <View style={styles.rowAmountItem}>
-          <Text style={styles.rowAmountLabel}>Ulush {Math.round(row.authorSharePercent)}%</Text>
-          <Text style={styles.rowAmountValue}>{Math.round(row.authorSharePercent)}%</Text>
-        </View>
-        <View style={styles.rowAmountItem}>
-          <Text style={styles.rowAmountLabel}>Sizga tushgan</Text>
-          <Text style={styles.rowShareValue}>{formatUzs(row.authorAmountUzs)}</Text>
-        </View>
+      {/* Amount line: sale "+", payout "−" */}
+      <View style={styles.amountLine}>
+        <Text style={[styles.amountText, { color: meta.color }]}>
+          {meta.sign} {formatUzs(amount)}
+        </Text>
+        {isSale && entry.royaltyPercent != null ? (
+          <Text style={styles.amountHint}>
+            Sotuv {formatUzs(entry.grossAmount)} · ulush {Math.round(entry.royaltyPercent)}%
+          </Text>
+        ) : null}
       </View>
 
-      {row.orderNumber ? (
-        <Text style={styles.rowOrder} numberOfLines={1}>
-          Buyurtma: {row.orderNumber}
-          {row.paymentStatus ? ` · ${row.paymentStatus}` : ""}
+      {entry.description && entry.contentTitle ? (
+        <Text style={styles.rowDesc} numberOfLines={2}>
+          {entry.description}
         </Text>
       ) : null}
+
+      {isPayout && entry.payoutReference ? (
+        <Text style={styles.rowOrder} numberOfLines={1}>
+          To'lov raqami: {entry.payoutReference}
+        </Text>
+      ) : null}
+
+      {/* Payout: "pul yetib kelmadi" complaint */}
+      {isPayout ? (
+        disputed ? (
+          <View style={styles.complaintDone}>
+            <AlertCircle color="#B45309" size={14} />
+            <Text style={styles.complaintDoneText}>
+              {disputedLabel ?? "Ko'rib chiqilmoqda"}
+            </Text>
+          </View>
+        ) : (
+          <PressableScale
+            onPress={submitting ? undefined : onComplain}
+            style={styles.complaintBtn}
+          >
+            {submitting ? (
+              <ActivityIndicator color="#B45309" size="small" />
+            ) : (
+              <AlertCircle color="#B45309" size={14} />
+            )}
+            <Text style={styles.complaintBtnText}>Menga hali pul yetib kelmadi</Text>
+          </PressableScale>
+        )
+      ) : null}
     </PressableScale>
+  );
+}
+
+function NotAuthorState({ c, styles }: { c: AppTheme; styles: ReturnType<typeof createStyles> }) {
+  return (
+    <View style={styles.emptyWrap}>
+      <View style={styles.emptyIcon}>
+        <UserX color={c.primary} size={30} strokeWidth={1.7} />
+      </View>
+      <Text style={styles.emptyTitle}>Muallif akkaunti emas</Text>
+      <Text style={styles.emptyText}>
+        Siz hali AdabiyotX platformasida muallif sifatida biriktirilmagansiz.
+      </Text>
+    </View>
   );
 }
 
@@ -286,9 +432,9 @@ function EmptyState({ c, styles }: { c: AppTheme; styles: ReturnType<typeof crea
       <View style={styles.emptyIcon}>
         <CheckCircle2 color={c.primary} size={30} strokeWidth={1.7} />
       </View>
-      <Text style={styles.emptyTitle}>Hali daromad mavjud emas</Text>
+      <Text style={styles.emptyTitle}>Hozircha daromad mavjud emas</Text>
       <Text style={styles.emptyText}>
-        Asaringiz sotilganda, har bir sotuvdan 50% muallif ulushi shu yerda ko'rinadi.
+        Asarlaringiz sotilganda bu yerda ko'rinadi.
       </Text>
     </View>
   );
@@ -459,18 +605,49 @@ function createStyles(c: AppTheme, isDark: boolean) {
     },
     typeBadgeText: { color: c.primary, fontSize: 10.5, fontWeight: "800" },
     rowDate: { color: c.textMuted, fontSize: 12, fontWeight: "600" },
-    rowAmountBox: {
+
+    amountLine: {
       flexDirection: "row",
+      alignItems: "baseline",
+      justifyContent: "space-between",
       marginTop: 12,
       backgroundColor: isDark ? "rgba(255,255,255,0.03)" : "rgba(15,122,82,0.04)",
       borderRadius: 12,
       paddingVertical: 10,
+      paddingHorizontal: 12,
+      gap: 8,
     },
-    rowAmountItem: { flex: 1, alignItems: "center" },
-    rowAmountLabel: { color: c.textMuted, fontSize: 10, fontWeight: "600" },
-    rowAmountValue: { color: c.textDim, fontSize: 12.5, fontWeight: "800", marginTop: 3 },
-    rowShareValue: { color: c.primary, fontSize: 13.5, fontWeight: "900", marginTop: 3 },
-    rowOrder: { color: c.textMuted, fontSize: 11, fontWeight: "500", marginTop: 10 },
+    amountText: { fontSize: 16, fontWeight: "900", letterSpacing: -0.3 },
+    amountHint: { color: c.textMuted, fontSize: 11, fontWeight: "600", flexShrink: 1 },
+
+    rowDesc: { color: c.textDim, fontSize: 12, fontWeight: "500", marginTop: 8, lineHeight: 17 },
+    rowOrder: { color: c.textMuted, fontSize: 11, fontWeight: "500", marginTop: 8 },
+
+    /* Complaint */
+    complaintBtn: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 7,
+      marginTop: 12,
+      height: 40,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: "rgba(245,158,11,0.5)",
+      backgroundColor: isDark ? "rgba(245,158,11,0.10)" : "rgba(245,158,11,0.08)",
+    },
+    complaintBtnText: { color: "#B45309", fontSize: 12.5, fontWeight: "800" },
+    complaintDone: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 7,
+      marginTop: 12,
+      height: 40,
+      borderRadius: 12,
+      backgroundColor: isDark ? "rgba(245,158,11,0.08)" : "rgba(245,158,11,0.06)",
+    },
+    complaintDoneText: { color: "#B45309", fontSize: 12.5, fontWeight: "700" },
 
     /* Empty / error */
     emptyWrap: { alignItems: "center", paddingHorizontal: 40, paddingVertical: 44, gap: 10 },

@@ -64,6 +64,7 @@ import type {
 import { recordReading } from "@/lib/shelfStore";
 import { shareContent } from "@/lib/share";
 import { useAuth } from "@/providers/AuthProvider";
+import { useAuthGate } from "@/providers/AuthGateProvider";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 const IS_WIDE = SCREEN_W >= 720;
@@ -99,6 +100,7 @@ export default function ScreenplayDetailScreen() {
   const insets = useSafeAreaInsets();
   const { screenplay, loading, error } = useScreenplay(typeof id === "string" ? id : undefined);
   const { isAuthenticated, userId } = useAuth();
+  const { promptLogin } = useAuthGate();
 
   const access = useContentAccess("scenario", screenplay?.id);
   const purchaseFlow = usePurchaseFlow();
@@ -143,7 +145,7 @@ export default function ScreenplayDetailScreen() {
 
   const handleBuy = () => {
     if (!isAuthenticated) {
-      router.push("/auth");
+      promptLogin();
       return;
     }
     if (paymentProductQuery.isLoading || paymentProductQuery.isFetching) return;
@@ -374,7 +376,11 @@ function ScreenplayOverview({
               <Text style={styles.heroBadgeText}>SSENARIY</Text>
             </View>
             <Text style={styles.heroTitle}>{screenplay.title}</Text>
-            <Text style={styles.heroMeta} numberOfLines={1}>
+            <Text
+              style={styles.heroMeta}
+              numberOfLines={1}
+              onPress={() => screenplay.authorId && router.push(`/author/${screenplay.authorId}` as never)}
+            >
               {screenplay.author} · {screenplay.genre}
             </Text>
           </View>

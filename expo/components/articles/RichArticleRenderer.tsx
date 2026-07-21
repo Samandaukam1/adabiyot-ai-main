@@ -18,7 +18,6 @@ import {
 } from "lucide-react-native";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -34,6 +33,7 @@ import type {
   RichArticleMedia,
   RichTextSegment,
 } from "@/lib/articles";
+import { openExternalUrl } from "@/utils/safeLinks";
 
 const PRIMARY = "#2F9E6E";
 const PAPER_MAX = 760;
@@ -388,7 +388,7 @@ function ExternalVideoBlock({
   const url = block.mediaUrl || block.url || "";
   const thumb = block.thumbnailUrl || youtubeThumb(url);
   const open = useCallback(() => {
-    if (url) Linking.openURL(url).catch(() => {});
+    if (url) void openExternalUrl(url);
   }, [url]);
 
   return (
@@ -564,7 +564,7 @@ function FileBlock({
 }) {
   const open = useCallback(() => {
     if (block.url || block.mediaUrl) {
-      Linking.openURL(block.url || block.mediaUrl || "").catch(() => {});
+      void openExternalUrl(block.url || block.mediaUrl || "");
     }
   }, [block.mediaUrl, block.url]);
 
@@ -595,7 +595,7 @@ function LinkBlock({
   styles: ReturnType<typeof createStyles>;
 }) {
   const open = useCallback(() => {
-    if (block.url) Linking.openURL(block.url).catch(() => {});
+    if (block.url) void openExternalUrl(block.url);
   }, [block.url]);
 
   return (
@@ -719,7 +719,7 @@ function InlineText({
         return (
           <Text
             key={`${segment.text}-${index}`}
-            onPress={link ? () => Linking.openURL(link.href).catch(() => {}) : undefined}
+            onPress={link ? () => void openExternalUrl(link.href) : undefined}
             style={styleForMarks(segment.marks, defaultFontFamily)}
           >
             {segment.text}

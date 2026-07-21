@@ -1,4 +1,4 @@
-import { BadgePercent, Check, X } from "lucide-react-native";
+import { BadgePercent, Check, TicketPercent, X } from "lucide-react-native";
 import React, { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
@@ -10,9 +10,12 @@ const DEEP_GREEN = "#0B5A3A";
 const WARN = "#C77700"; // soft amber — avoids a harsh red
 
 /**
- * Promo-code entry for the checkout sheet. Collapses to an "applied" chip with a
- * remove action once a code is in effect; otherwise shows an input + "Qo'llash"
- * button with inline validation feedback.
+ * Promo-code entry for the checkout sheet.
+ *
+ * - When a code is in effect (auto or manual) → an "applied" chip with a remove
+ *   action, always visible.
+ * - Otherwise the input is hidden behind a small "Menda promo kod bor" pill; the
+ *   input + "Qo'llash" + "Yopish" only appear once the user taps it.
  */
 export default function PromoCodeInput({
   appliedCode,
@@ -32,6 +35,8 @@ export default function PromoCodeInput({
   const { colors: c, isDark } = useTheme();
   const styles = useMemo(() => createStyles(c, isDark), [c, isDark]);
   const [code, setCode] = useState("");
+  const [expanded, setExpanded] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
 
   // Clear the field once a code is successfully applied.
   useEffect(() => {
@@ -57,7 +62,39 @@ export default function PromoCodeInput({
     );
   }
 
-  const canApply = code.trim().length > 0 && !validating;
+  // Collapsed: just the trigger pill.
+  if (!expanded) {
+    return (
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => setExpanded(true)}
+        hitSlop={6}
+        style={styles.triggerBtn}
+      >
+        <TicketPercent color={c.primary} size={16} />
+        <Text style={styles.triggerText}>Menda promo kod bor</Text>
+      </Pressable>
+    );
+  }
+
+  const handleApply = () => {
+    if (validating) return;
+    const trimmed = code.trim().toUpperCase();
+    if (!trimmed) {
+      setLocalError("Promo kodni kiriting");
+      return;
+    }
+    setLocalError(null);
+    onApply(trimmed);
+  };
+
+  const handleClose = () => {
+    setExpanded(false);
+    setCode("");
+    setLocalError(null);
+  };
+
+  const shownError = localError ?? error;
 
   return (
     <View>
@@ -67,19 +104,23 @@ export default function PromoCodeInput({
           <TextInput
             style={styles.input}
             value={code}
-            onChangeText={setCode}
+            onChangeText={(t) => {
+              setCode(t);
+              if (localError) setLocalError(null);
+            }}
             placeholder="Promo kod"
             placeholderTextColor={c.textMuted}
             autoCapitalize="characters"
             autoCorrect={false}
+            autoFocus
             returnKeyType="done"
-            onSubmitEditing={() => canApply && onApply(code)}
+            onSubmitEditing={handleApply}
             editable={!validating}
           />
         </View>
         <PressableScale
-          onPress={canApply ? () => onApply(code) : undefined}
-          style={[styles.applyBtn, ...(canApply ? [] : [styles.applyBtnDisabled])]}
+          onPress={validating ? undefined : handleApply}
+          style={[styles.applyBtn, ...(validating ? [styles.applyBtnDisabled] : [])]}
         >
           {validating ? (
             <ActivityIndicator color="#fff" size="small" />
@@ -88,7 +129,10 @@ export default function PromoCodeInput({
           )}
         </PressableScale>
       </View>
-      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+      {shownError ? <Text style={styles.errorText}>{shownError}</Text> : null}
+      <Pressable onPress={handleClose} hitSlop={8} style={styles.closeBtn} disabled={validating}>
+        <Text style={styles.closeText}>Yopish</Text>
+      </Pressable>
     </View>
   );
 }
@@ -122,6 +166,22 @@ function createStyles(c: AppTheme, isDark: boolean) {
     applyBtnDisabled: { backgroundColor: c.textMuted },
     applyText: { color: "#fff", fontSize: 14.5, fontWeight: "800" },
     errorText: { color: WARN, fontSize: 12.5, fontWeight: "600", marginTop: 8 },
+
+    triggerBtn: {
+      flexDirection: "row",
+      alignItems: "center",
+      alignSelf: "flex-start",
+      gap: 7,
+      paddingVertical: 9,
+      paddingHorizontal: 14,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: isDark ? "rgba(82,183,136,0.32)" : "rgba(11,90,58,0.22)",
+      backgroundColor: isDark ? "rgba(82,183,136,0.10)" : "rgba(11,90,58,0.05)",
+    },
+    triggerText: { color: accent, fontSize: 13.5, fontWeight: "700" },
+    closeBtn: { alignSelf: "flex-start", paddingVertical: 8, paddingHorizontal: 4, marginTop: 6 },
+    closeText: { color: c.textDim, fontSize: 13, fontWeight: "700" },
 
     appliedRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
     appliedChip: {

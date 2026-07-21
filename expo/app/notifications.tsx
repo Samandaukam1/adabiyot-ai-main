@@ -9,6 +9,7 @@ import {
   Sparkles,
   Star,
   UserPlus,
+  Wallet,
 } from "lucide-react-native";
 import React, { useMemo } from "react";
 import {
@@ -24,6 +25,7 @@ import type { AppTheme } from "@/constants/colors";
 import { PressableScale } from "@/components/ui";
 import VerificationBadge from "@/components/VerificationBadge";
 import { openContentPreview } from "@/lib/contentNavigation";
+import { openExternalUrl } from "@/utils/safeLinks";
 import { useTheme } from "@/providers/ThemeProvider";
 import { useAuth } from "@/providers/AuthProvider";
 import {
@@ -45,11 +47,12 @@ function relativeTime(iso: string): string {
   return new Date(iso).toLocaleDateString("uz-UZ", { day: "numeric", month: "long" });
 }
 
-/** Creator-application notifications render as a "AdabiyotX" system message. */
+/** Creator/payout notifications render as a "AdabiyotX" system message. */
 function isCreatorNotification(type: NotificationType): boolean {
   return (
     type === "creator_application_submitted" ||
-    type === "creator_application_approved"
+    type === "creator_application_approved" ||
+    type === "author_payout_paid"
   );
 }
 
@@ -65,17 +68,40 @@ function iconFor(type: NotificationType, c: AppTheme) {
       return <Star color="#F59E0B" size={15} />;
     case "new_content":
       return <Sparkles color={c.primary} size={15} />;
+    case "marathon_report":
+      return <Award color={c.primary} size={15} />;
     case "creator_application_submitted":
       return <Sparkles color="#38BDF8" size={15} />;
     case "creator_application_approved":
       return <Award color="#F59E0B" size={15} />;
+    case "author_payout_paid":
+      return <Wallet color="#F59E0B" size={15} />;
     default:
       return <Bell color={c.primary} size={15} />;
   }
 }
 
+/** A marathon report (or any notification) may carry a PDF link in metadata. */
+function reportPdfUrl(n: AppNotification): string | null {
+  const meta = n.metadata;
+  if (!meta) return null;
+  const candidate = meta.pdf_url ?? meta.report_url ?? meta.report_pdf_url ?? meta.url;
+  return typeof candidate === "string" && candidate.trim() ? candidate : null;
+}
+
 function navigateTo(n: AppNotification) {
+  // Marathon report PDFs (delivered via metadata) open in the browser safely;
+  // a bad/malicious link is ignored by openExternalUrl rather than crashing.
+  const pdf = reportPdfUrl(n);
+  if (pdf) {
+    void openExternalUrl(pdf);
+    return;
+  }
+
   switch (n.type) {
+    case "author_payout_paid":
+      router.push("/muallif/daromadlar");
+      return;
     case "creator_application_submitted":
       router.push("/creator/become");
       return;
@@ -160,6 +186,11 @@ export default function NotificationsScreen() {
           {items.map((n) => {
             const system = isCreatorNotification(n.type);
             const name = system ? "AdabiyotX" : n.actorName?.trim() || "AdabiyotX";
+            // Payout notifications keep a readable title even when the server
+            // wrote none — tapping them opens Muallif daromadlari.
+            const title =
+              n.title ??
+              (n.type === "author_payout_paid" ? "Muallif daromadi to'landi" : null);
             const avatarUrl = system ? null : n.actorAvatarUrl;
             const badge = system
               ? ("none" as VerificationType)
@@ -185,7 +216,7 @@ export default function NotificationsScreen() {
                     <Text style={styles.name} numberOfLines={1}>{name}</Text>
                     {badge !== "none" && <VerificationBadge verificationType={badge} size="sm" />}
                   </View>
-                  {n.title ? <Text style={styles.notifTitle}>{n.title}</Text> : null}
+                  {title ? <Text style={styles.notifTitle}>{title}</Text> : null}
                   {n.body ? (
                     <Text style={styles.body} numberOfLines={2}>{n.body}</Text>
                   ) : null}

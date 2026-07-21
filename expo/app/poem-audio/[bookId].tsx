@@ -29,7 +29,7 @@ import { useApp } from "@/providers/AppProvider";
 import { useTheme } from "@/providers/ThemeProvider";
 
 const { width: SCREEN_W } = Dimensions.get("window");
-const SPEEDS: Array<1 | 1.25 | 1.5 | 2> = [1, 1.25, 1.5, 2];
+const SPEEDS: (1 | 1.25 | 1.5 | 2)[] = [1, 1.25, 1.5, 2];
 
 function readParam(value: string | string[] | undefined, fallback = ""): string {
   if (Array.isArray(value)) return value[0] ?? fallback;

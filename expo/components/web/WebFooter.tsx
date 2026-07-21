@@ -1,12 +1,13 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React from "react";
-import { Linking, Pressable, Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import BrandLogo from "@/components/BrandLogo";
 import { FONT } from "@/components/ui";
 import { useResponsive } from "@/hooks/useResponsive";
 import { useBranding } from "@/providers/BrandingProvider";
 import { useTheme } from "@/providers/ThemeProvider";
+import { isSafeInternalRoute, openExternalUrl } from "@/utils/safeLinks";
 import { useHover } from "./useHover";
 import { cursorPointer, hoverTransition } from "./webStyle";
 import WebContainer from "./WebContainer";
@@ -25,7 +26,7 @@ const COLUMNS: { title: string; links: FooterLink[] }[] = [
       { label: "Tokcha", href: "/(tabs)/tokcha" },
       { label: "Reels", href: "/(tabs)/reels" },
       { label: "So'zlab", href: "/(tabs)/sozlab" },
-      { label: "Adiblar", href: "/adiblar" },
+      { label: "Adiblar", href: "/adib-encyclopedia" },
     ],
   },
   {
@@ -52,8 +53,8 @@ function FooterLinkRow({ link }: { link: FooterLink }) {
   const { hovered, onHoverIn, onHoverOut } = useHover();
   const navigable = !!link.href || !!link.url;
   const onPress = () => {
-    if (link.href) router.push(link.href as any);
-    else if (link.url) Linking.openURL(link.url).catch(() => {});
+    if (link.href && isSafeInternalRoute(link.href)) router.push(link.href as any);
+    else if (link.url) void openExternalUrl(link.url);
   };
   return (
     <Pressable
@@ -74,7 +75,7 @@ function Social({ name, url }: { name: React.ComponentProps<typeof Ionicons>["na
   const { hovered, onHoverIn, onHoverOut } = useHover();
   return (
     <Pressable
-      onPress={() => Linking.openURL(url).catch(() => {})}
+      onPress={() => void openExternalUrl(url)}
       onHoverIn={onHoverIn}
       onHoverOut={onHoverOut}
       style={[

@@ -32,9 +32,14 @@ export interface SupabaseBook {
   id: string;
   title: string;
   author: string;
+  author_id?: string | null;
+  author_profile_id?: string | null;
   publisher: string | null;
   publisher_type: PublisherType;
   genre: string | null;
+  genre_id?: string | null;
+  category?: string | null;
+  category_id?: string | null;
   description: string | null;
   cover_url: string | null;
   file_url: string | null;
@@ -63,9 +68,14 @@ export interface MobileBook {
   id: string;
   title: string;
   author: string;
+  author_id?: string | null;
+  author_profile_id?: string | null;
   publisher: string | null;
   publisher_type: PublisherType;
   genre: string | null;
+  genre_id?: string | null;
+  category?: string | null;
+  category_id?: string | null;
   description: string | null;
   cover_url: string | null;
   file_url: string | null;
@@ -75,8 +85,9 @@ export interface MobileBook {
   is_free: boolean;
   status: BookStatus;
   submission_status: SubmissionStatus | null;
-  created_at: string;
-  published_at: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  published_at?: string | null;
   has_internal_reader: boolean | null;
   content_mode: string | null;
   raw_content: string | null;
@@ -95,6 +106,8 @@ export interface SupabasePoem {
   id: string;
   title: string;
   author: string | null;
+  author_id?: string | null;
+  author_profile_id?: string | null;
   publisher: string | null;
   cover_url: string | null;
   text?: string | null;
@@ -602,10 +615,17 @@ export interface DisplayBook {
   id: string;
   title: string;
   authorName: string;
+  authorId: string | null;
+  authorProfileId: string | null;
   publisherName: string;
   publisherType: PublisherType;
   cover: string;
   genre: string;
+  /** FK into `content_genres` — set by the admin panel's "Janr" field. */
+  genreId: string | null;
+  /** Admin panel's "Kategoriya" field (text) + its `content_categories` FK. */
+  category: string | null;
+  categoryId: string | null;
   description: string;
   audioUrl: string | null;
   fileUrl: string | null;
@@ -626,10 +646,15 @@ export function mobileBookToDisplay(mb: MobileBook): DisplayBook {
     id: mb.id,
     title: mb.title,
     authorName: mb.author,
+    authorId: mb.author_id ?? null,
+    authorProfileId: mb.author_profile_id ?? null,
     publisherName: mb.publisher ?? "",
     publisherType: mb.publisher_type ?? null,
     cover: mb.cover_url ?? "",
     genre: mb.genre ?? "Roman",
+    genreId: mb.genre_id ?? null,
+    category: mb.category ?? null,
+    categoryId: mb.category_id ?? null,
     description: mb.description ?? "",
     audioUrl: mb.audio_url,
     fileUrl: mb.file_url,
@@ -638,7 +663,7 @@ export function mobileBookToDisplay(mb: MobileBook): DisplayBook {
     isFree: mb.is_free,
     status: mb.status,
     submissionStatus: mb.submission_status ?? null,
-    createdAt: mb.created_at,
+    createdAt: mb.created_at ?? mb.published_at ?? "",
     source: "supabase",
     hasInternalReader: mb.has_internal_reader ?? false,
     contentMode: mb.content_mode ?? null,
@@ -675,10 +700,15 @@ export function poemToDisplay(poem: SupabasePoem): DisplayBook {
     id: poem.id,
     title: poem.title || "Nomsiz she'r",
     authorName: poem.author || "Noma'lum muallif",
+    authorId: poem.author_id ?? null,
+    authorProfileId: poem.author_profile_id ?? null,
     publisherName: poem.publisher || "",
     publisherType: null,
     cover: poem.cover_url ?? "",
     genre: "She'r",
+    genreId: null,
+    category: null,
+    categoryId: null,
     description: poem.short_description ?? poem.description ?? "",
     audioUrl: poem.audio_url ?? null,
     fileUrl: poem.file_url ?? null,
@@ -701,10 +731,15 @@ export function supabaseBookToDisplay(sb: SupabaseBook): DisplayBook {
     id: sb.id,
     title: sb.title,
     authorName: sb.author,
+    authorId: sb.author_id ?? null,
+    authorProfileId: sb.author_profile_id ?? null,
     publisherName: sb.publisher ?? "",
     publisherType: null,
     cover: sb.cover_url ?? "",
     genre: sb.genre ?? "Roman",
+    genreId: sb.genre_id ?? null,
+    category: sb.category ?? null,
+    categoryId: sb.category_id ?? null,
     description: sb.description ?? "",
     audioUrl: sb.audio_url,
     fileUrl: sb.file_url,

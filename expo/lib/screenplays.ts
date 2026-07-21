@@ -764,6 +764,7 @@ function resolveReferences(
 }
 
 const SELECT_WITH_AUTHOR = "*, authors(full_name)";
+const PUBLISHED_SCREENPLAYS_LIMIT = 120;
 
 async function selectScreenplays(build: (q: any) => any): Promise<any[]> {
   const withJoin = await build(db.from("screenplays").select(SELECT_WITH_AUTHOR));
@@ -786,16 +787,17 @@ async function queryPublished(orderCol: string): Promise<any[] | null> {
     .from("screenplays")
     .select("*")
     .eq("status", "published")
-    .order(orderCol, { ascending: false });
+    .order(orderCol, { ascending: false })
+    .limit(PUBLISHED_SCREENPLAYS_LIMIT);
   if (res.error) {
-    console.log(`[WebScreenplays] status/${orderCol} error:`, res.error?.message ?? res.error);
+    if (__DEV__) console.log(`[WebScreenplays] status/${orderCol} error:`, res.error?.message ?? res.error);
     return null;
   }
   return Array.isArray(res.data) ? res.data : [];
 }
 
 export async function fetchPublishedScreenplays(): Promise<ScreenplayCard[]> {
-  console.log("[WebScreenplays] fetching...");
+  if (__DEV__) console.log("[WebScreenplays] fetching...");
 
   // Primary path: status='published'. The old `.or(status,is_published)` 400'd
   // because `is_published` does not exist on the table — which silently emptied
@@ -807,8 +809,8 @@ export async function fetchPublishedScreenplays(): Promise<ScreenplayCard[]> {
   // Last resort: no filter (some deployments may lack `status`), then keep only
   // rows that look published. This also tolerates a future `is_published` flag.
   if (rows === null || rows.length === 0) {
-    const all = await db.from("screenplays").select("*").order("created_at", { ascending: false });
-    console.log("[WebScreenplays] fallback count:", all.data?.length, "error:", all.error?.message ?? null);
+    const all = await db.from("screenplays").select("*").order("created_at", { ascending: false }).limit(PUBLISHED_SCREENPLAYS_LIMIT);
+    if (__DEV__) console.log("[WebScreenplays] fallback count:", all.data?.length, "error:", all.error?.message ?? null);
     if (!all.error && Array.isArray(all.data)) {
       rows = all.data.filter((x: Record<string, any>) => {
         const status = str(x.status).toLowerCase();
@@ -821,7 +823,7 @@ export async function fetchPublishedScreenplays(): Promise<ScreenplayCard[]> {
   }
 
   const mapped = (rows ?? []).map(mapCard).filter((c) => c.id);
-  console.log("[WebScreenplays] count:", mapped.length);
+  if (__DEV__) console.log("[WebScreenplays] count:", mapped.length);
   return mapped;
 }
 
@@ -919,7 +921,7 @@ export async function fetchScreenplayById(idOrSlug: string): Promise<DisplayScre
   blocks = resolveReferences(blocks, characters, scenes, music);
   const toc = buildToc(blocks, parsed?.toc ?? []);
 
-  console.log(
+  if (__DEV__) console.log(
     "[ScreenplayDetail] blocks count:", blocks.length,
     "scenes:", scenes.length,
     "characters:", characters.length,

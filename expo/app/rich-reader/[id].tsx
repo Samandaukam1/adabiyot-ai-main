@@ -9,9 +9,9 @@ export default function RichReaderScreen() {
   const bookId = Array.isArray(rawId) ? rawId[0] : rawId;
 
   useEffect(() => {
-    console.log("📖 READER SCREEN OPENED");
-    console.log("📖 READER PARAMS:", params);
-    console.log("📖 READER BOOK ID:", bookId);
+    if (__DEV__) console.log("📖 READER SCREEN OPENED");
+    if (__DEV__) console.log("📖 READER PARAMS:", params);
+    if (__DEV__) console.log("📖 READER BOOK ID:", bookId);
 
     if (!bookId || bookId === "undefined") {
       console.error("❌ READER ERROR: bookId is missing or invalid", params);

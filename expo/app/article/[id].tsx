@@ -4,7 +4,6 @@ import { router, useLocalSearchParams } from "expo-router";
 import RatingReviewBlock from "@/components/RatingReviewBlock";
 import {
   ArrowLeft,
-  Bookmark,
   Clock,
   Heart,
   Lock,
@@ -48,6 +47,7 @@ import { usePromo } from "@/hooks/usePromo";
 import { usePlannedRead } from "@/hooks/useShelf";
 import { shareContent } from "@/lib/share";
 import { useAuth } from "@/providers/AuthProvider";
+import { useAuthGate } from "@/providers/AuthGateProvider";
 import { getInitials } from "@/types/profile";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
@@ -117,6 +117,7 @@ export default function ArticleDetailScreen() {
   const insets = useSafeAreaInsets();
   const { article, loading, error } = useArticleContent(typeof id === "string" ? id : undefined);
   const { isAuthenticated } = useAuth();
+  const { promptLogin } = useAuthGate();
   const access = useContentAccess("article", article?.id);
   const purchaseFlow = usePurchaseFlow();
   const paymentProductQuery = usePaymentProduct("article", article?.id);
@@ -136,7 +137,7 @@ export default function ArticleDetailScreen() {
   const scrollY = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    if (article) console.log("[ArticleDetail] blocks count:", article.blocks?.length ?? 0);
+    if (__DEV__ && article) console.log("[ArticleDetail] blocks count:", article.blocks?.length ?? 0);
   }, [article]);
 
   const theme = PAGE_THEMES[pageThemeKey];
@@ -174,7 +175,7 @@ export default function ArticleDetailScreen() {
   // Open the confirm sheet (gated by login); access is granted only by the backend.
   const handleBuy = () => {
     if (!isAuthenticated) {
-      router.push("/auth");
+      promptLogin();
       return;
     }
     if (paymentProductQuery.isLoading || paymentProductQuery.isFetching) return;
@@ -408,7 +409,11 @@ function ArticleHero({
         {publishedDate ? <Text style={styles.heroDate}>{publishedDate}</Text> : null}
         <Text style={styles.heroTitle}>{article.title}</Text>
         {article.hasAuthor && article.author ? (
-          <View style={styles.authorRow}>
+          <Pressable
+            style={styles.authorRow}
+            disabled={!article.authorProfileId}
+            onPress={() => article.authorProfileId && router.push(`/author/${article.authorProfileId}` as never)}
+          >
             <HeroAvatar uri={article.authorAvatarUrl} name={article.author} styles={styles} />
             <View style={{ flex: 1 }}>
               <View style={styles.authorNameRow}>
@@ -421,7 +426,7 @@ function ArticleHero({
                 <Text style={styles.authorRole} numberOfLines={1}>{article.authorRole}</Text>
               ) : null}
             </View>
-          </View>
+          </Pressable>
         ) : null}
       </View>
     </Animated.View>

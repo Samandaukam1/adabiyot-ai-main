@@ -18,6 +18,42 @@ function logTokchaBannerError(error: TokchaBannerError) {
   });
 }
 
+function normalizeText(value: string | null | undefined): string | null {
+  const text = value?.trim();
+  return text ? text : null;
+}
+
+function compareNullableNumbers(left: number | null, right: number | null): number {
+  if (left === right) return 0;
+  if (left === null) return 1;
+  if (right === null) return -1;
+  return left - right;
+}
+
+export function sortTokchaBanners(rows: MobileTokchaBanner[]): MobileTokchaBanner[] {
+  return [...rows]
+    .filter((banner) => banner.is_active !== false)
+    .sort((left, right) => {
+      const leftIsMarathon = normalizeText(left.target_type)?.toLowerCase() === "marathon";
+      const rightIsMarathon = normalizeText(right.target_type)?.toLowerCase() === "marathon";
+
+      if (leftIsMarathon !== rightIsMarathon) return leftIsMarathon ? -1 : 1;
+
+      const sortOrderComparison = compareNullableNumbers(
+        left.sort_order,
+        right.sort_order
+      );
+      if (sortOrderComparison !== 0) return sortOrderComparison;
+
+      const createdAtComparison = (left.created_at ?? "").localeCompare(
+        right.created_at ?? ""
+      );
+      if (createdAtComparison !== 0) return createdAtComparison;
+
+      return left.id.localeCompare(right.id);
+    });
+}
+
 async function fetchTokchaBannerRows(): Promise<{
   banners: MobileTokchaBanner[];
   error: string | null;
@@ -26,15 +62,19 @@ async function fetchTokchaBannerRows(): Promise<{
     const { data, error } = await (supabase as any)
       .from("mobile_tokcha_banners")
       .select("*")
+      .eq("is_active", true)
       .order("sort_order", { ascending: true })
-      .limit(7);
+      .order("created_at", { ascending: true });
 
     if (error) {
       logTokchaBannerError(error as TokchaBannerError);
       return { banners: [], error: "Bannerlar yuklanmadi" };
     }
 
-    return { banners: (data ?? []).slice(0, 7), error: null };
+    return {
+      banners: sortTokchaBanners((data ?? []) as MobileTokchaBanner[]),
+      error: null,
+    };
   } catch (error) {
     const typedError = error as TokchaBannerError;
     logTokchaBannerError({

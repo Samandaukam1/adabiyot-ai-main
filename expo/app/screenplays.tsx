@@ -49,13 +49,13 @@ export default function ScreenplaysHub() {
   );
 
   useEffect(() => {
-    console.log("[ScreenplaysPage] mounted");
+    if (__DEV__) console.log("[ScreenplaysPage] mounted");
   }, []);
 
   useEffect(() => {
-    console.log("[ScreenplaysPage] count:", screenplays?.length);
-    console.log("[ScreenplaysPage] data:", screenplays);
-    console.log("[ScreenplaysPage] error:", error);
+    if (__DEV__) console.log("[ScreenplaysPage] count:", screenplays?.length);
+    if (__DEV__) console.log("[ScreenplaysPage] data:", screenplays);
+    if (__DEV__) console.log("[ScreenplaysPage] error:", error);
   }, [error, screenplays]);
 
   return (
@@ -79,10 +79,6 @@ export default function ScreenplaysHub() {
             </Text>
           </View>
         </View>
-
-        <Text style={{ color: "red", paddingHorizontal: 18 }}>
-          DEBUG screenplays: {screenplays.length} | loading: {String(loading)} | error: {error || "none"}
-        </Text>
 
         {genres.length > 1 ? (
           <ScrollView

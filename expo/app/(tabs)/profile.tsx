@@ -7,9 +7,9 @@ import {
   BookOpen,
   Globe,
   Instagram,
+  LogIn,
   Mic,
   Pencil,
-  Play,
   Send,
   Settings,
   Sparkles,
@@ -19,7 +19,6 @@ import {
 } from "lucide-react-native";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Linking,
   Platform,
   Pressable,
   RefreshControl,
@@ -30,7 +29,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { AppTheme } from "@/constants/colors";
-import { FadeSlideIn, ScreenTransitionWrapper, StaggeredCard } from "@/components/animations";
+import { FadeSlideIn, ScreenTransitionWrapper } from "@/components/animations";
 import VerificationBadge from "@/components/VerificationBadge";
 import VerificationInfoSheet from "@/components/VerificationInfoSheet";
 import AccountTypeLabel from "@/components/AccountTypeLabel";
@@ -44,15 +43,17 @@ import { books, getAuthor, getBookRoute } from "@/mocks/content";
 import { getInitials, isApprovedCreator, profileHandle, resolveDisplayBadge } from "@/types/profile";
 import AuthorWorkCard from "@/components/AuthorWorkCard";
 import { useOwnedContentSet } from "@/hooks/usePayments";
-import { useAuthorWorks, useIsAuthor } from "@/hooks/useAuthorAccount";
+import { useAuthorWorks, useEffectiveAuthorId, useIsAuthor } from "@/hooks/useAuthorAccount";
 import { useShelf } from "@/hooks/useShelf";
 import { useProfileFollowCounts, fetchFollowers, fetchFollowing } from "@/hooks/useFollowLists";
 import { ProfilePeopleModal, ProfileReadsModal } from "@/components/ProfileStatModals";
 import type { AuthorWork } from "@/types/author";
 import { useProfile } from "@/providers/ProfileProvider";
 import { useAuth } from "@/providers/AuthProvider";
+import { useAuthGate } from "@/providers/AuthGateProvider";
 import { useBranding } from "@/providers/BrandingProvider";
 import { useTheme } from "@/providers/ThemeProvider";
+import { openExternalUrl } from "@/utils/safeLinks";
 
 type ContentTab = "asarlar" | "reels" | "monologlar" | "maqolalar";
 
@@ -62,8 +63,14 @@ export default function ProfileScreen() {
   const { colors: c, isDark, toggleTheme } = useTheme();
   const { appName } = useBranding();
   const { profile } = useProfile();
-  const { userId, refreshProfileRow } = useAuth();
+  const { userId, refreshProfileRow, isAuthenticated, isGuest, signOut } = useAuth();
+  const { requireAuth } = useAuthGate();
   const isAuthor = useIsAuthor();
+  // Guest → leave guest mode and land on the auth screen. Signing out clears the
+  // guest flag so the root redirect gate lets /auth through.
+  const handleExitGuest = useCallback(async () => {
+    await signOut();
+  }, [signOut]);
   const { works: authorWorks, refetch: refetchAuthorWorks } = useAuthorWorks();
   const styles = useMemo(() => createStyles(c, isDark), [c, isDark]);
   const handleRefresh = useCallback(async () => {
@@ -104,8 +111,16 @@ export default function ProfileScreen() {
   const worksCount = isAuthor ? authorWorks.length : profile.worksCount;
   // Combined author/creator badge (spec #6): "Ijodkor + Muallif" / "Ijodkor" /
   // "Muallif". Falls back to the account's own verification badge for VIP etc.
-  const displayBadge = resolveDisplayBadge(profile);
+  // The badge honours the reverse authors→account link too, so an account the
+  // admin linked only from the authors side still shows as Muallif.
+  const { authorId: effectiveAuthorId } = useEffectiveAuthorId();
+  const displayBadge = resolveDisplayBadge({
+    ...profile,
+    authorId: profile.authorId ?? effectiveAuthorId,
+  });
   const nameBadgeType = displayBadge?.type ?? profile.verificationType;
+  const displayAccountType =
+    isAuthor && profile.accountType === "reader" ? "adib" : profile.accountType;
 
   const handleCreatorAction = useCallback(async () => {
     await refreshProfileRow().catch(() => {});
@@ -162,7 +177,7 @@ export default function ProfileScreen() {
             <View style={[styles.coverTopBar, { paddingTop: insets.top + 8 }]}>
               {isReader ? (
                 <PressableScale
-                  onPress={() => router.push("/creator/become")}
+                  onPress={() => requireAuth(() => router.push("/creator/become"))}
                   style={styles.becomeCreatorBtn}
                 >
                   <LinearGradient
@@ -194,6 +209,22 @@ export default function ProfileScreen() {
                       <TrendingUp color="#fff" size={14} strokeWidth={2.6} />
                       <Text style={styles.earningsTopText} numberOfLines={1}>
                         Daromadlar
+                      </Text>
+                    </LinearGradient>
+                  </PressableScale>
+                ) : null}
+                {/* Mehmon rejimida: kun-tun/parametrlar yonida "Kirish" tugmasi */}
+                {!isAuthenticated && isGuest ? (
+                  <PressableScale onPress={handleExitGuest} style={styles.guestExitBtn}>
+                    <LinearGradient
+                      colors={["#F59E0B", "#EA8A00"]}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0 }}
+                      style={styles.guestExitInner}
+                    >
+                      <LogIn color="#fff" size={14} strokeWidth={2.6} />
+                      <Text style={styles.guestExitText} numberOfLines={1}>
+                        Kirish
                       </Text>
                     </LinearGradient>
                   </PressableScale>
@@ -240,7 +271,7 @@ export default function ProfileScreen() {
             </View>
             <View style={styles.avatarActions}>
               <PressableScale
-                onPress={() => router.push("/edit-profile")}
+                onPress={() => requireAuth(() => router.push("/edit-profile"))}
                 style={styles.editBtn}
               >
                 <Pencil color={c.primary} size={14} strokeWidth={2.4} />
@@ -265,7 +296,7 @@ export default function ProfileScreen() {
               <Text style={styles.handle}>@{profileHandle(profile)}</Text>
               <View style={styles.roleRow}>
                 <AccountTypeLabel
-                  accountType={profile.accountType}
+                  accountType={displayAccountType}
                   publisherSubType={profile.publisherSubType}
                   size="lg"
                   color={c.primary}
@@ -372,8 +403,8 @@ function SocialLinks({
 }) {
   const items: { key: string; icon: React.ReactNode; url: string }[] = [];
   const open = (url: string) => {
-    const full = url.startsWith("http") ? url : `https://${url}`;
-    Linking.openURL(full).catch(() => {});
+    // Normalizes bare domains to https and blocks javascript:/data: links.
+    void openExternalUrl(url);
   };
   if (profile.websiteUrl) items.push({ key: "web", icon: <Globe color={c.primary} size={16} />, url: profile.websiteUrl });
   if (profile.instagramUrl) items.push({ key: "ig", icon: <Instagram color="#E1306C" size={16} />, url: profile.instagramUrl });
@@ -469,23 +500,28 @@ function ContentTabView({
   isDark: boolean;
   styles: ReturnType<typeof createStyles>;
 }) {
+  const literaryWorks = authorWorks.filter(
+    (work) => work.contentType !== "article" && work.contentType !== "monologue"
+  );
+  const articleWorks = authorWorks.filter((work) => work.contentType === "article");
+  const monologueWorks = authorWorks.filter((work) => work.contentType === "monologue");
+
   if (tab === "asarlar") {
     // Author accounts show THEIR OWN works (from the linked author record);
     // readers keep their purchased-books shelf.
     if (isAuthor) {
-      if (authorWorks.length === 0) {
+      if (literaryWorks.length === 0) {
         return (
           <EmptyTabState
             c={c}
             icon={<BookOpen color={c.textMuted} size={32} strokeWidth={1.5} />}
-            text="Hali asarlar mavjud emas"
-            sub="Sizga biriktirilgan asarlar shu yerda ko'rinadi"
+            text="Hozircha profilingizga biriktirilgan asarlar yo'q."
           />
         );
       }
       return (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 16, paddingVertical: 18 }}>
-          {authorWorks.map((w) => (
+          {literaryWorks.map((w) => (
             <AuthorWorkCard key={`${w.contentType}:${w.id}`} work={w} width={128} />
           ))}
         </ScrollView>
@@ -517,6 +553,15 @@ function ContentTabView({
   }
 
   if (tab === "monologlar") {
+    if (monologueWorks.length > 0) {
+      return (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 16, paddingVertical: 18 }}>
+          {monologueWorks.map((work) => (
+            <AuthorWorkCard key={`${work.contentType}:${work.id}`} work={work} width={128} />
+          ))}
+        </ScrollView>
+      );
+    }
     return (
       <EmptyTabState
         c={c}
@@ -524,6 +569,16 @@ function ContentTabView({
         text="Monologlar hali yo'q"
         sub="She'r, hikoya va audio ijrolaringizni ulashing"
       />
+    );
+  }
+
+  if (isAuthor && articleWorks.length > 0) {
+    return (
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 16, paddingVertical: 18 }}>
+        {articleWorks.map((work) => (
+          <AuthorWorkCard key={`${work.contentType}:${work.id}`} work={work} width={128} />
+        ))}
+      </ScrollView>
     );
   }
 
@@ -690,6 +745,25 @@ function createStyles(c: AppTheme, isDark: boolean) {
       paddingHorizontal: 14,
     },
     earningsTopText: { color: "#fff", fontSize: 13.5, fontWeight: "800" },
+
+    /* Mehmon rejimidan chiqish — "Kirish" tugmasi (kun-tun yonida) */
+    guestExitBtn: {
+      borderRadius: 999,
+      overflow: "hidden",
+      shadowColor: "#B8860B",
+      shadowOpacity: 0.3,
+      shadowRadius: 9,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 5,
+    },
+    guestExitInner: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      height: 38,
+      paddingHorizontal: 14,
+    },
+    guestExitText: { color: "#fff", fontSize: 13.5, fontWeight: "800" },
 
     /* Name / bio */
     nameSect: { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4, gap: 4 },

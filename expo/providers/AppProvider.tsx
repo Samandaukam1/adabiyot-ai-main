@@ -86,7 +86,9 @@ export const [AppProvider, useApp] = createContextHook(() => {
           setState({ ...defaultsForScope, ...(JSON.parse(raw) as PersistedState) });
         }
       })
-      .catch((e) => console.log("[AppProvider] load error", e))
+      .catch((e) => {
+        if (__DEV__) console.log("[AppProvider] load error", e);
+      })
       .finally(() => {
         if (active) setIsReady(true);
       });

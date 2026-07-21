@@ -52,11 +52,11 @@ export function usePublicReels(userId?: string | null) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
     setLoading(true);
     setError(null);
     try {
-      const rows = await fetchPublicReels(userId);
+      const rows = await fetchPublicReels(userId, { force });
       setReels(rows);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Reels yuklanmadi");
@@ -66,9 +66,11 @@ export function usePublicReels(userId?: string | null) {
     }
   }, [userId]);
 
+  const refresh = useCallback(() => load(true), [load]);
+
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    load(false);
+  }, [load]);
 
   return { reels, setReels, loading, error, refresh };
 }

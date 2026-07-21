@@ -13,12 +13,15 @@ import WebJaxongirOrb from "@/components/web/WebJaxongirOrb";
 import BrandingLoadingScreen from "@/components/BrandingLoadingScreen";
 import { AppProvider } from "@/providers/AppProvider";
 import { AuthProvider, useAuth } from "@/providers/AuthProvider";
+import { AuthGateProvider, useAuthGate } from "@/providers/AuthGateProvider";
 import { BrandingProvider } from "@/providers/BrandingProvider";
 import { ProfileProvider } from "@/providers/ProfileProvider";
 import { ThemeProvider, useTheme } from "@/providers/ThemeProvider";
 import { JaxongirAIProvider, useJaxongirAI } from "@/providers/JaxongirAIProvider";
 import JaxongirAIAssistant from "@/components/jaxongir-ai/JaxongirAIAssistant";
 import SplashIntro from "@/components/SplashIntro";
+import RootErrorBoundary from "@/components/RootErrorBoundary";
+import AppUpdateChecker from "@/components/update/AppUpdateChecker";
 import {
   fetchActiveSplashIntro,
   markSplashIntroShown,
@@ -29,7 +32,29 @@ import { getContextFromPath } from "@/utils/jaxongirContext";
 
 SplashScreen.preventAutoHideAsync();
 
-const queryClient = new QueryClient();
+// Expo Router renders this in place of a crashed screen instead of white-screening.
+export function ErrorBoundary({ error, retry }: { error: Error; retry: () => Promise<void> }) {
+  return (
+    <SafeAreaProvider>
+      <RootErrorBoundary error={error} retry={retry} />
+    </SafeAreaProvider>
+  );
+}
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 60_000,
+      gcTime: 5 * 60_000,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: true,
+      retry: 1,
+    },
+    mutations: {
+      retry: 0,
+    },
+  },
+});
 const HIDDEN_HEADER_OPTIONS = { headerShown: false };
 const MODAL_HIDDEN_HEADER_OPTIONS = { presentation: "modal" as const, headerShown: false };
 const TRANSPARENT_TITLE_OPTIONS = { title: "", headerTransparent: true };
@@ -55,6 +80,7 @@ function JaxongirAIOverlay() {
 function RootLayoutNav() {
   const { colors, isDark } = useTheme();
   const { loading, isAuthenticated, isGuest } = useAuth();
+  const { modal: authGateModal } = useAuthGate();
   const segments = useSegments();
   const { isWebLayout } = useResponsive();
   const [splashState, setSplashState] = useState<SplashGateState>("checking");
@@ -64,7 +90,8 @@ function RootLayoutNav() {
   useEffect(() => {
     if (loading) return;
     const onAuthScreen = segments[0] === "auth";
-    const canEnter = isAuthenticated || isGuest;
+    const onPublicEncyclopediaScreen = segments[0] === "adib-encyclopedia";
+    const canEnter = isAuthenticated || isGuest || onPublicEncyclopediaScreen;
     if (!canEnter && !onAuthScreen) {
       router.replace("/auth");
     } else if (canEnter && onAuthScreen) {
@@ -157,12 +184,18 @@ function RootLayoutNav() {
         <Stack.Screen name="muallif/asarlar" options={HIDDEN_HEADER_OPTIONS} />
         <Stack.Screen name="creator/become" options={MODAL_HIDDEN_HEADER_OPTIONS} />
         <Stack.Screen name="creator/submit" options={HIDDEN_HEADER_OPTIONS} />
+        <Stack.Screen name="author-application" options={HIDDEN_HEADER_OPTIONS} />
         <Stack.Screen name="settings/index" options={HIDDEN_HEADER_OPTIONS} />
         <Stack.Screen name="edit-profile" options={HIDDEN_HEADER_OPTIONS} />
         <Stack.Screen name="adiblar/index" options={HIDDEN_HEADER_OPTIONS} />
         <Stack.Screen name="adiblar/[id]" options={HIDDEN_HEADER_OPTIONS} />
+        <Stack.Screen name="adib-encyclopedia/index" options={HIDDEN_HEADER_OPTIONS} />
+        <Stack.Screen name="adib-encyclopedia/[id]" options={HIDDEN_HEADER_OPTIONS} />
+        <Stack.Screen name="adib-encyclopedia/apply" options={HIDDEN_HEADER_OPTIONS} />
         <Stack.Screen name="top-royxatlar" options={HIDDEN_HEADER_OPTIONS} />
         <Stack.Screen name="kitoblar" options={HIDDEN_HEADER_OPTIONS} />
+        <Stack.Screen name="janrlar" options={HIDDEN_HEADER_OPTIONS} />
+        <Stack.Screen name="kategoriyalar" options={HIDDEN_HEADER_OPTIONS} />
         <Stack.Screen name="u/[id]" options={HIDDEN_HEADER_OPTIONS} />
         <Stack.Screen name="notifications" options={HIDDEN_HEADER_OPTIONS} />
         <Stack.Screen name="payments/tariflar" options={HIDDEN_HEADER_OPTIONS} />
@@ -174,6 +207,8 @@ function RootLayoutNav() {
       {showWebHeader ? <WebCursorGlow /> : null}
       {showWebHeader ? <WebJaxongirOrb /> : null}
       <JaxongirAIOverlay />
+      {authGateModal}
+      <AppUpdateChecker />
       {loading || splashState === "checking" ? (
         <View pointerEvents="auto" style={styles.loadingOverlay}>
           <BrandingLoadingScreen />
@@ -220,13 +255,15 @@ export default function RootLayout() {
           <AuthProvider>
             <AppProvider>
               <ProfileProvider>
-                <JaxongirAIProvider>
-                  <SafeAreaProvider>
-                    <GestureHandlerRootView style={{ flex: 1 }}>
-                      <RootLayoutNav />
-                    </GestureHandlerRootView>
-                  </SafeAreaProvider>
-                </JaxongirAIProvider>
+                <AuthGateProvider>
+                  <JaxongirAIProvider>
+                    <SafeAreaProvider>
+                      <GestureHandlerRootView style={{ flex: 1 }}>
+                        <RootLayoutNav />
+                      </GestureHandlerRootView>
+                    </SafeAreaProvider>
+                  </JaxongirAIProvider>
+                </AuthGateProvider>
               </ProfileProvider>
             </AppProvider>
           </AuthProvider>

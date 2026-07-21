@@ -11,6 +11,14 @@ interface BrandLogoProps {
   size?: number;
   radius?: number;
   style?: StyleProp<ViewStyle>;
+  /** Render the mark on its own, with no coloured badge behind it. */
+  plain?: boolean;
+  /**
+   * Use the bundled asset instead of the admin-configured remote URL. The launch
+   * screen needs this: a remote logo isn't cached on a cold start, so it would
+   * pop in a frame after the native splash and read as a *second* logo.
+   */
+  bundledOnly?: boolean;
 }
 
 export default function BrandLogo({
@@ -18,6 +26,8 @@ export default function BrandLogo({
   size = 44,
   radius = 12,
   style,
+  plain = false,
+  bundledOnly = false,
 }: BrandLogoProps) {
   const { colors } = useTheme();
   const {
@@ -30,18 +40,19 @@ export default function BrandLogo({
   } = useBranding();
   const [failed, setFailed] = useState(false);
 
-  const source =
-    variant === "icon"
-      ? appIconSource
-      : variant === "splash"
-      ? splashLogoSource
-      : logoSource;
   const fallbackSource =
     variant === "icon"
       ? defaultAppIconSource
       : variant === "splash"
       ? defaultSplashLogoSource
       : defaultLogoSource;
+  const remoteSource =
+    variant === "icon"
+      ? appIconSource
+      : variant === "splash"
+      ? splashLogoSource
+      : logoSource;
+  const source = bundledOnly ? fallbackSource : remoteSource;
 
   useEffect(() => {
     setFailed(false);
@@ -54,8 +65,8 @@ export default function BrandLogo({
         {
           width: size,
           height: size,
-          borderRadius: radius,
-          backgroundColor: colors.primary,
+          borderRadius: plain ? 0 : radius,
+          backgroundColor: plain ? "transparent" : colors.primary,
         },
         style,
       ]}

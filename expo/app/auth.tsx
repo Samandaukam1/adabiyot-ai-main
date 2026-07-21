@@ -107,7 +107,8 @@ export default function AuthScreen() {
             )}
           </PressableScale>
 
-          {Platform.OS === "ios" && appleAvailable && (
+          {/* Apple: native sheet on iOS, Supabase OAuth in the browser on web. */}
+          {(Platform.OS === "web" || (Platform.OS === "ios" && appleAvailable)) && (
             <PressableScale
               onPress={busy ? undefined : handleApple}
               style={[styles.btn, styles.appleBtn]}
@@ -117,7 +118,7 @@ export default function AuthScreen() {
               ) : (
                 <>
                   <Ionicons name="logo-apple" size={22} color="#fff" />
-                  <Text style={styles.appleText}>Apple bilan kirish</Text>
+                  <Text style={styles.appleText}>Apple bilan davom etish</Text>
                 </>
               )}
             </PressableScale>

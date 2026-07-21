@@ -10,8 +10,10 @@ export type NotificationType =
   | "new_content"
   | "rating"
   | "system"
+  | "marathon_report"
   | "creator_application_submitted"
-  | "creator_application_approved";
+  | "creator_application_approved"
+  | "author_payout_paid";
 
 export interface AppNotification {
   id: string;
