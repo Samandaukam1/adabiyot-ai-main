@@ -81,6 +81,13 @@ const LATEST_CHIP = "Eng yangi";
 const CAROUSEL_LIMIT = 5;
 const LATEST_CAROUSEL_LIMIT = 10;
 
+// One vertical rhythm for every section on this page, so the shelves read as a
+// dense, even stack instead of drifting apart:
+//   …row ⟶ ROW_BOTTOM_PAD ⟶ SECTION_GAP ⟶ title ⟶ SECTION_TITLE_GAP ⟶ row…
+const SECTION_GAP = 20;
+const SECTION_TITLE_GAP = 11;
+const ROW_BOTTOM_PAD = 2;
+
 type Cat = string;
 
 /** Icon per taxonomy name; anything unlisted falls back to a neutral glyph. */
@@ -578,7 +585,7 @@ const BookGridCard = memo(function BookGridCard({ book, onPress }: { book: Displ
   const { colors: L } = useTheme();
   return (
     <PressableScale onPress={onPress} style={{ width: GRID_CELL }}>
-      <BookCover uri={book.cover} width={GRID_CELL} radius={10} placeholderIcon="book" style={{ marginBottom: 10 }}>
+      <BookCover uri={book.cover} width={GRID_CELL} radius={10} placeholderIcon="book" style={{ marginBottom: 8 }}>
         <View style={{ position: "absolute", top: 9, left: 9 + 12, backgroundColor: book.isFree ? L.primary : "rgba(0,0,0,0.58)", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 7 }}>
           <Text style={{ color: "#fff", fontSize: 9, fontWeight: "800", letterSpacing: 0.5 }}>{book.isFree ? "BEPUL" : `${Math.floor(book.price / 1000)}k`}</Text>
         </View>
@@ -617,8 +624,8 @@ const GenreRowSection = memo(function GenreRowSection({
           justifyContent: "space-between",
           alignItems: "baseline",
           paddingHorizontal: 20,
-          marginBottom: 14,
-          marginTop: 28,
+          marginBottom: SECTION_TITLE_GAP,
+          marginTop: SECTION_GAP,
         }}
       >
         <Text style={{ color: L.text, fontSize: 20, fontWeight: "800", fontFamily: FONT.serif, letterSpacing: -0.4 }}>
@@ -633,7 +640,7 @@ const GenreRowSection = memo(function GenreRowSection({
         showsHorizontalScrollIndicator={false}
         decelerationRate="fast"
         snapToInterval={GRID_CELL + GRID_GAP}
-        contentContainerStyle={{ paddingHorizontal: GRID_PAD, gap: GRID_GAP, paddingBottom: 8 }}
+        contentContainerStyle={{ paddingHorizontal: GRID_PAD, gap: GRID_GAP, paddingBottom: ROW_BOTTOM_PAD }}
       >
         {books.map((book, index) => (
           <StaggeredCard key={book.id} index={index}>
@@ -1047,13 +1054,13 @@ function MobileHomeScreen() {
           ))}
         </ScrollView>
 
-        <View style={{ flexDirection: "row", justifyContent: "center", gap: 5, marginTop: 16 }}>
+        <View style={{ flexDirection: "row", justifyContent: "center", gap: 5, marginTop: 12 }}>
           {newBooks.map((_, i) => (
             <View key={i} style={[{ width: 6, height: 6, borderRadius: 3, backgroundColor: L.surface }, i === carouselIdx && { width: 22, height: 6, backgroundColor: L.primary }]} />
           ))}
         </View>
 
-        <Animated.View style={{ alignItems: "center", marginTop: 12, paddingHorizontal: 40, marginBottom: 4, opacity: titleOpacity }}>
+        <Animated.View style={{ alignItems: "center", marginTop: 10, paddingHorizontal: 40, opacity: titleOpacity }}>
           <Text numberOfLines={1} style={{ color: L.text, fontSize: 18, fontWeight: "800", fontFamily: FONT.serif, textAlign: "center", letterSpacing: -0.3 }}>{newBooks[carouselIdx]?.title ?? ""}</Text>
           <Text numberOfLines={1} style={{ color: L.primary, fontSize: 13, fontWeight: "600", marginTop: 4, textAlign: "center" }}>{newBooks[carouselIdx]?.authorName ?? ""}</Text>
         </Animated.View>
@@ -1170,7 +1177,7 @@ function MobileHomeScreen() {
 
         {/* ── ADABIYOTLAR SECTION ─────────────────────────────────────────────── */}
         <View onLayout={(e) => { adabiyotlarYRef.current = e.nativeEvent.layout.y; }}>
-          <FadeSlideIn delay={320} distance={14} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", paddingHorizontal: 20, marginBottom: 12, marginTop: 18 }}>
+          <FadeSlideIn delay={320} distance={14} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", paddingHorizontal: 20, marginBottom: SECTION_TITLE_GAP, marginTop: SECTION_GAP }}>
             <Text style={{ color: L.text, fontSize: 22, fontWeight: "800", fontFamily: FONT.serif, letterSpacing: -0.4 }}>Adabiyotlar</Text>
             <Text onPress={() => router.push("/kitoblar")} style={{ color: L.primary, fontSize: 13, fontWeight: "600" }}>Barcha asarlar</Text>
           </FadeSlideIn>
@@ -1200,8 +1207,8 @@ function MobileHomeScreen() {
 
         {/* ── ENG YANGI CAROUSEL (only while that chip is selected) ───────────── */}
         {isLatestSelected ? (
-          <FadeSlideIn delay={80} distance={16} style={{ marginTop: 14 }}>
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", paddingHorizontal: 20, marginBottom: 14 }}>
+          <FadeSlideIn delay={80} distance={16} style={{ marginTop: 12 }}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", paddingHorizontal: 20, marginBottom: SECTION_TITLE_GAP }}>
               <Text style={{ color: L.text, fontSize: 20, fontWeight: "800", fontFamily: FONT.serif, letterSpacing: -0.4 }}>Eng yangi adabiyotlar</Text>
               <Text onPress={() => router.push("/kitoblar")} style={{ color: L.primary, fontSize: 13, fontWeight: "600" }}>Barchasi</Text>
             </View>
@@ -1210,18 +1217,18 @@ function MobileHomeScreen() {
         ) : null}
 
         {/* ── BOOK GRID ────────────────────────────────────────────────────────── */}
-        <FadeSlideIn delay={580} distance={14} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", paddingHorizontal: 20, marginBottom: 14, marginTop: 28 }}>
+        <FadeSlideIn delay={580} distance={14} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", paddingHorizontal: 20, marginBottom: SECTION_TITLE_GAP, marginTop: SECTION_GAP }}>
           <Text style={{ color: L.text, fontSize: 22, fontWeight: "800", fontFamily: FONT.serif, letterSpacing: -0.4 }}>Top asarlar</Text>
           <Text onPress={() => router.push("/kitoblar")} style={{ color: L.primary, fontSize: 13, fontWeight: "600" }}>Barchasi</Text>
         </FadeSlideIn>
-        <View style={{ marginTop: 4 }}>
+        <View>
           {booksLoading && gridBooks.length === 0 ? (
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
               decelerationRate="fast"
               snapToInterval={GRID_CELL + GRID_GAP}
-              contentContainerStyle={{ paddingHorizontal: GRID_PAD, gap: GRID_GAP, paddingBottom: 8 }}
+              contentContainerStyle={{ paddingHorizontal: GRID_PAD, gap: GRID_GAP, paddingBottom: ROW_BOTTOM_PAD }}
             >
               {Array.from({ length: 4 }).map((_, i) => (
                 <View key={i} style={{ width: GRID_CELL }}>
@@ -1234,7 +1241,7 @@ function MobileHomeScreen() {
               ))}
             </ScrollView>
           ) : gridBooks.length === 0 ? (
-            <View style={{ alignItems: "center", justifyContent: "center", paddingVertical: 40, gap: 10 }}>
+            <View style={{ alignItems: "center", justifyContent: "center", paddingVertical: 22, gap: 8 }}>
               <MaterialCommunityIcons name="book-open-variant" size={32} color={L.textMuted} />
               <Text style={{ color: L.textMuted, fontSize: 13 }}>Bu kategoriyada kitoblar yo'q</Text>
             </View>
@@ -1244,7 +1251,7 @@ function MobileHomeScreen() {
               showsHorizontalScrollIndicator={false}
               decelerationRate="fast"
               snapToInterval={GRID_CELL + GRID_GAP}
-              contentContainerStyle={{ paddingHorizontal: GRID_PAD, gap: GRID_GAP, paddingBottom: 8 }}
+              contentContainerStyle={{ paddingHorizontal: GRID_PAD, gap: GRID_GAP, paddingBottom: ROW_BOTTOM_PAD }}
             >
               {gridBooks.map((book, index) => (
                 <StaggeredCard key={book.id} index={index}>
@@ -1270,7 +1277,7 @@ function MobileHomeScreen() {
 
         {/* ── CAROUSEL (default slot — moves up when "Eng yangi" is on) ───────── */}
         {isLatestSelected ? null : (
-          <FadeSlideIn delay={520} distance={18} style={{ marginTop: 22 }}>
+          <FadeSlideIn delay={520} distance={18} style={{ marginTop: SECTION_GAP }}>
             {renderLatestCarousel()}
           </FadeSlideIn>
         )}
@@ -1278,7 +1285,7 @@ function MobileHomeScreen() {
         {/* ── MAQOLALAR (A4 ARTICLE CARDS) ────────────────────────────────────── */}
         {articleCards.length > 0 ? (
           <>
-            <FadeSlideIn delay={600} distance={14} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", paddingHorizontal: 20, marginBottom: 14, marginTop: 30 }}>
+            <FadeSlideIn delay={600} distance={14} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", paddingHorizontal: 20, marginBottom: SECTION_TITLE_GAP, marginTop: SECTION_GAP }}>
               <Text style={{ color: L.text, fontSize: 22, fontWeight: "800", fontFamily: FONT.serif, letterSpacing: -0.4 }}>Maqolalar</Text>
               <Pressable onPress={() => router.push("/(tabs)/maqolalar")}>
                 <Text style={{ color: L.primary, fontSize: 13, fontWeight: "600" }}>Barchasi</Text>
@@ -1289,7 +1296,7 @@ function MobileHomeScreen() {
               showsHorizontalScrollIndicator={false}
               decelerationRate="fast"
               snapToInterval={ARTICLE_CARD_W + 14}
-              contentContainerStyle={{ paddingHorizontal: GRID_PAD, gap: 14, paddingBottom: 8 }}
+              contentContainerStyle={{ paddingHorizontal: GRID_PAD, gap: 14, paddingBottom: ROW_BOTTOM_PAD }}
             >
               {articleCards.map((card, index) => (
                 <StaggeredCard key={card.id} index={index}>
@@ -1301,7 +1308,7 @@ function MobileHomeScreen() {
         ) : null}
 
         {/* ── EXPLORE SHORTCUTS ─────────────────────────────────────────────── */}
-        <FadeSlideIn delay={620} distance={14} style={{ marginTop: 28 }}>
+        <FadeSlideIn delay={620} distance={14} style={{ marginTop: SECTION_GAP }}>
           <ExploreShortcutButtons />
         </FadeSlideIn>
 
