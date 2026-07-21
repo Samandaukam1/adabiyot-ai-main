@@ -1,0 +1,23 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appIDs": ["JLXP29ZS4D.uz.adabiyotx.app"],
+        "components": [
+          { "/": "/book/*", "comment": "Book detail links" },
+          { "/": "/reels/*", "comment": "Reels links" },
+          { "/": "/sozlab/*", "comment": "SozLab post links" },
+          { "/": "/profile/*", "comment": "Profile links" },
+          { "/": "/author/*", "comment": "Author profile links" },
+          { "/": "/u/*", "comment": "Public profile links" },
+          { "/": "/poem/*", "comment": "Poem links" },
+          { "/": "/article/*", "comment": "Article links" },
+          { "/": "/screenplay/*", "comment": "Screenplay links" },
+          { "/": "/adib-encyclopedia/*", "comment": "Adib encyclopedia links" },
+          { "/": "/open", "comment": "QR / certificate open bridge" }
+        ]
+      }
+    ]
+  }
+}

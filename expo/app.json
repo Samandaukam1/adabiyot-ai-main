@@ -12,6 +12,10 @@
       "supportsTablet": false,
       "bundleIdentifier": "uz.adabiyotx.app",
       "usesAppleSignIn": true,
+      "associatedDomains": [
+        "applinks:adabiyotx.uz",
+        "applinks:www.adabiyotx.uz"
+      ],
       "infoPlist": {
         "UIBackgroundModes": [
           "audio"
@@ -29,6 +33,26 @@
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
         "android.permission.WAKE_LOCK"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "adabiyotx.uz"
+            },
+            {
+              "scheme": "https",
+              "host": "www.adabiyotx.uz"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
       ]
     },
     "web": {

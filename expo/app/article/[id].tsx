@@ -20,7 +20,6 @@ import {
   Animated,
   Dimensions,
   Pressable,
-  Share,
   StyleSheet,
   Text,
   View,
@@ -46,6 +45,7 @@ import {
 import { usePromo } from "@/hooks/usePromo";
 import { usePlannedRead } from "@/hooks/useShelf";
 import { shareContent } from "@/lib/share";
+import { sharePublicLink } from "@/lib/shareLinks";
 import { useAuth } from "@/providers/AuthProvider";
 import { useAuthGate } from "@/providers/AuthGateProvider";
 import { getInitials } from "@/types/profile";
@@ -392,7 +392,7 @@ function ArticleHero({
           </Pressable>
           <Pressable
             onPress={() =>
-              shareContent({ title: article.title, author: article.hasAuthor ? article.author : null, description: article.description })
+              shareContent({ title: article.title, author: article.hasAuthor ? article.author : null, description: article.description, type: "article", id: article.id })
             }
             style={styles.heroIconButton}
             hitSlop={8}
@@ -446,10 +446,7 @@ function ActionRow({
   const likeCount = article.likesCount + (liked ? 1 : 0);
 
   const onShare = () => {
-    Share.share({
-      title: article.title,
-      message: `${article.title}\n\nAdabiyotX`,
-    }).catch(() => {});
+    void sharePublicLink({ type: "article", id: article.id, title: article.title });
   };
 
   return (

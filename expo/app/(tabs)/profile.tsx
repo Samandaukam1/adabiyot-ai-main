@@ -36,6 +36,7 @@ import AccountTypeLabel from "@/components/AccountTypeLabel";
 import RealisticWorkCard from "@/components/RealisticWorkCard";
 import PremiumCreatorActionButton from "@/components/PremiumCreatorActionButton";
 import ProfileContentTabs from "@/components/ProfileContentTabs";
+import ProfileShareButton from "@/components/ProfileShareButton";
 import ProfileReelsGrid from "@/components/ProfileReelsGrid";
 import { FONT, PressableScale } from "@/components/ui";
 import { usePullToRefresh } from "@/hooks/usePullToRefresh";
@@ -270,6 +271,12 @@ export default function ProfileScreen() {
               )}
             </View>
             <View style={styles.avatarActions}>
+              <ProfileShareButton
+                profileId={profile.id}
+                username={profile.username}
+                displayName={profile.displayName}
+                size={42}
+              />
               <PressableScale
                 onPress={() => requireAuth(() => router.push("/edit-profile"))}
                 style={styles.editBtn}

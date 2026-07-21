@@ -36,6 +36,7 @@ import { usePublishedBook } from "@/hooks/usePublishedBooks";
 import { useAudioPlayer } from "@/hooks/useAudioPlayer";
 import { useBookAudio, type AudioTocItem } from "@/hooks/useBookAudio";
 import { formatTimecode } from "@/lib/media";
+import { getPublicShareUrl } from "@/lib/shareLinks";
 import { useApp } from "@/providers/AppProvider";
 import { useTheme } from "@/providers/ThemeProvider";
 import { useAuth } from "@/providers/AuthProvider";
@@ -158,9 +159,14 @@ export default function AudioPlayer() {
 
   const onShare = useCallback(async () => {
     try {
-      await Share.share({ message: `${book?.title ?? "AdabiyotX"} — ${book?.authorName ?? ""}` });
+      const link = getPublicShareUrl("book", book?.id);
+      await Share.share({
+        message: [`${book?.title ?? "AdabiyotX"} — ${book?.authorName ?? ""}`, link]
+          .filter(Boolean)
+          .join("\n"),
+      });
     } catch { }
-  }, [book?.title, book?.authorName]);
+  }, [book?.id, book?.title, book?.authorName]);
 
   const bars = useMemo(
     () => Array.from({ length: BAR_COUNT }).map((_, i) => 6 + Math.abs(Math.sin(i * 0.65)) * 30 + (i % 4) * 2),

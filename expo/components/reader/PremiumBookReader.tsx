@@ -37,6 +37,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { FONT, PressableScale } from "@/components/ui";
+import { getPublicShareUrl } from "@/lib/shareLinks";
 import type { Book, ReaderChapter } from "@/mocks/content";
 import type { AudioSessionState, ReaderBookmark } from "@/providers/AppProvider";
 import {
@@ -487,13 +488,18 @@ export default function PremiumBookReader({
   const shareCurrentPage = useCallback(async () => {
     if (!textToolExcerpt) return;
     try {
+      // The public book link travels with the excerpt so a reader who taps it
+      // lands on this book — in the app when it is installed.
+      const link = getPublicShareUrl("book", book.id);
       await Share.share({
-        message: `${textToolExcerpt}\n\n${book.title} — ${authorName ?? "AdabiyotX"}`,
+        message: [`${textToolExcerpt}`, `${book.title} — ${authorName ?? "AdabiyotX"}`, link]
+          .filter(Boolean)
+          .join("\n\n"),
       });
     } catch {
       // Ignore user-cancelled share actions.
     }
-  }, [authorName, book.title, textToolExcerpt]);
+  }, [authorName, book.id, book.title, textToolExcerpt]);
 
   const openAudio = useCallback(() => {
     if (!currentPage) return;

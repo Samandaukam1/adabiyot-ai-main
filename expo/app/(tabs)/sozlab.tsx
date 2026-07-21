@@ -31,7 +31,6 @@ import {
   Pressable,
   RefreshControl,
   ScrollView,
-  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -63,6 +62,7 @@ import { books, getAuthor, getBookRoute } from "@/mocks/content";
 import { resolveProfileAvatarUrl } from "@/lib/media";
 import { supabase } from "@/lib/supabase";
 import { openContentPreview } from "@/lib/contentNavigation";
+import { sharePublicLink } from "@/lib/shareLinks";
 import { createNotification, useUnreadNotificationCount } from "@/hooks/useNotifications";
 import { recordMentions, type MentionPick } from "@/lib/mentions";
 import { MentionSuggestionList, MentionText, useMentionAutocomplete } from "@/components/sozlab/MentionTextInput";
@@ -321,11 +321,14 @@ export default function SozLabScreen() {
   }, [reportTarget]);
 
   const handleShare = useCallback(async (post: Post) => {
-    try {
-      await Share.share({ message: `${post.text}\n\n— AdabiyotX · So'zLab` });
-    } catch {
-      // user cancelled / unavailable — ignore
-    }
+    // Carries the public https://adabiyotx.uz/sozlab/<id> link so the receiver
+    // opens this exact post — in the app when installed, on the web otherwise.
+    await sharePublicLink({
+      type: "sozlab",
+      id: post.id,
+      title: post.authorName ?? "AdabiyotX",
+      message: `${post.text}\n\n— AdabiyotX · So'zLab`,
+    });
   }, []);
 
   const handleCommentAdded = useCallback((postId: string) => {

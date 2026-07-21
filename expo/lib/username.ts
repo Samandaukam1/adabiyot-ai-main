@@ -82,3 +82,43 @@ export async function saveUsername(raw: string): Promise<string | null> {
   if (error) throw new Error(error.message || "Username saqlanmadi");
   return (data as string | null) ?? null;
 }
+
+/** A raw profile id (uuid) rather than an @username. */
+export function isProfileId(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.trim());
+}
+
+/**
+ * Resolve a shared `/profile/<key>` link to a profile id. `key` is either the
+ * uuid itself or an @username. Returns null when nobody owns that handle, so
+ * the screen can show its "topilmadi" state instead of an empty profile.
+ */
+export async function resolveProfileIdFromShareKey(key: string): Promise<string | null> {
+  const raw = String(key ?? "").trim();
+  if (!raw) return null;
+  if (isProfileId(raw)) return raw;
+
+  const normalized = normalizeUsername(raw);
+  if (!normalized) return null;
+
+  // Public view first — it is readable by anonymous visitors on the web.
+  for (const table of ["mobile_public_profiles", "profiles"]) {
+    const { data, error } = await (supabase as any)
+      .from(table)
+      .select("id")
+      .ilike("username", normalized)
+      .limit(1)
+      .maybeSingle();
+    if (!error && data?.id) return data.id as string;
+  }
+
+  // Last resort: the security-definer resolver (works even when RLS hides the
+  // row). Absent on deployments that haven't run the share-links migration.
+  const { data, error } = await (supabase as any).rpc("resolve_public_share_link", {
+    p_type: "profile",
+    p_key: normalized,
+  });
+  if (error) return null;
+  const row = Array.isArray(data) ? data[0] : data;
+  return (row?.target_id as string | undefined) ?? null;
+}

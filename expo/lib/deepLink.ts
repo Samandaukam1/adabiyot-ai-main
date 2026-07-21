@@ -13,6 +13,16 @@ export const CONTENT_ROUTE: Record<string, string> = {
   article: "article",
   screenplay: "screenplay",
   poem: "poem",
+  // Share targets — a shared `https://adabiyotx.uz/<segment>/<id>` link must
+  // resolve to the SAME route inside the app.
+  reels: "reels",
+  reel: "reels",
+  sozlab: "sozlab",
+  post: "sozlab",
+  profile: "profile",
+  u: "u",
+  author: "author",
+  "adib-encyclopedia": "adib-encyclopedia",
 };
 
 export type ContentType = keyof typeof CONTENT_ROUTE;
@@ -104,12 +114,32 @@ export function authCallbackRoutePath(rawUrl: string): string {
   return search ? `${AUTH_CALLBACK_ROUTE}?${search}` : AUTH_CALLBACK_ROUTE;
 }
 
+/** `adabiyotx.uz`, `www.adabiyotx.uz`, `192.168.1.5:8081`, `localhost:8081`… */
+function isHostSegment(segment: string): boolean {
+  if (/^localhost(:\d+)?$/i.test(segment)) return true;
+  return /^[a-z0-9-]+(\.[a-z0-9-]+)+(:\d+)?$/i.test(segment);
+}
+
+/**
+ * Drop everything in front of the real path: the host of a universal link
+ * (`https://adabiyotx.uz/book/1` → `book/1`) and the Expo Go `--` marker
+ * (`exp://192.168.1.5:8081/--/book/1`).
+ */
+function stripLinkPrefix(segments: string[]): string[] {
+  let out = segments;
+  if (out.length > 0 && isHostSegment(out[0]!)) out = out.slice(1);
+  if (out.length > 0 && out[0] === "--") out = out.slice(1);
+  return out;
+}
+
 /**
  * Resolve any incoming deep-link path to an in-app route, or null to fall back.
- * Handles both `adabiyotx://open?type=..&id=..` and `adabiyotx://<type>/<id>`.
+ * Handles `adabiyotx://open?type=..&id=..`, `adabiyotx://<type>/<id>` and the
+ * public universal links (`https://[www.]adabiyotx.uz/<type>/<id>`).
  */
 export function resolveDeepLinkPath(rawPath: string): string | null {
-  const { segments, query } = parseDeepLink(rawPath);
+  const { segments: raw, query } = parseDeepLink(rawPath);
+  const segments = stripLinkPrefix(raw);
   if (segments.length === 0) return null;
 
   // /open?type=screenplay&id=123  → /screenplay/123

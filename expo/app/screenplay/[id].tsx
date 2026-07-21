@@ -361,7 +361,7 @@ function ScreenplayOverview({
                 <Clock color="#fff" size={19} />
               </Pressable>
               <Pressable
-                onPress={() => shareContent({ title: screenplay.title, author: screenplay.author, description: screenplay.description })}
+                onPress={() => shareContent({ title: screenplay.title, author: screenplay.author, description: screenplay.description, type: "screenplay", id: screenplay.id })}
                 style={styles.heroIconButton}
                 hitSlop={8}
                 accessibilityLabel="Ulashish"

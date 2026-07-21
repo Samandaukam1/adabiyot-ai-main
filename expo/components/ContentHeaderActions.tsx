@@ -67,8 +67,10 @@ export default function ContentHeaderActions({
   }, [contentId, toggle, title, cover, author, showToast]);
 
   const onShare = useCallback(() => {
-    void shareContent({ title, author, description });
-  }, [title, author, description]);
+    // The public link (https://adabiyotx.uz/book/<id>) rides along, so the
+    // receiver lands on this exact page — in the app when it's installed.
+    void shareContent({ title, author, description, type: contentType, id: contentId });
+  }, [title, author, description, contentType, contentId]);
 
   const btnStyle = [
     styles.iconBtn,

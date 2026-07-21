@@ -615,6 +615,50 @@ export async function fetchPublicReels(
   }));
 }
 
+/**
+ * One published reel by id — the target of a shared `/reels/<id>` link. Returns
+ * null when the id is unknown / the reel is no longer public, so the screen can
+ * show its "topilmadi" state instead of an empty player.
+ */
+export async function fetchReelById(
+  reelId: string | null | undefined,
+  currentUserId?: string | null
+): Promise<PublicReel | null> {
+  const id = normalizeString(reelId);
+  if (!id) return null;
+
+  const selectOne = async (table: string, columns: string) =>
+    (supabase as any).from(table).select(columns).eq("id", id).maybeSingle();
+
+  // The public view is readable by anonymous visitors (web), the base table
+  // covers deployments where the view is missing a column.
+  let { data, error } = await selectOne("public_reels", PUBLIC_REELS_SELECT);
+  if (error || !data) {
+    let fallback = await selectOne("reels", USER_REELS_SELECT);
+    if (fallback.error && isMissingColumnError(fallback.error)) {
+      fallback = await selectOne("reels", TABLE_REELS_BASIC_SELECT);
+    }
+    data = fallback.data;
+    error = fallback.error;
+    // A reel pulled from the base table must still be publicly visible.
+    if (data && (data.status === "rejected" || data.is_published === false)) return null;
+  }
+  if (error || !data) return null;
+
+  const userId = normalizeString(data.user_id);
+  const profileMap = await fetchPublicProfileMap([userId]);
+  const reel = toPublicReel(data, profileMap[userId ?? ""]);
+  if (!reel) return null;
+
+  const [withLinked] = await attachLinkedContent([reel]);
+  const state = await fetchReelInteractionState([reel.id], currentUserId);
+  return {
+    ...(withLinked ?? reel),
+    likedByMe: state.liked.has(reel.id),
+    savedByMe: state.saved.has(reel.id),
+  };
+}
+
 export async function fetchSavedReels(userId: string | null | undefined): Promise<PublicReel[]> {
   if (!userId) return [];
   const { data, error } = await (supabase as any)

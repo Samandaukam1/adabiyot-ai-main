@@ -14,6 +14,7 @@ import VerificationInfoSheet from "@/components/VerificationInfoSheet";
 import AccountTypeLabel from "@/components/AccountTypeLabel";
 import AuthorWorkCard from "@/components/AuthorWorkCard";
 import ProfileContentTabs, { type ProfileTabKey } from "@/components/ProfileContentTabs";
+import ProfileShareButton from "@/components/ProfileShareButton";
 import ProfileReelsGrid from "@/components/ProfileReelsGrid";
 import { useAuthorPublicWorks, useAuthorWorks } from "@/hooks/useAuthorAccount";
 import { resolveProfileAvatarUrl } from "@/lib/media";
@@ -284,6 +285,13 @@ export default function PublicProfileScreen() {
             )}
           </View>
           <View style={styles.actions}>
+            {/* Shares the profile being VIEWED — on someone else's page that is
+                their link, not the signed-in user's. */}
+            <ProfileShareButton
+              profileId={profile.id}
+              username={profile.username}
+              displayName={profile.displayName}
+            />
             {isOwn ? (
               <PressableScale onPress={() => router.push("/edit-profile")} style={styles.editBtn}>
                 <Pencil color={c.primary} size={14} strokeWidth={2.4} />
@@ -533,7 +541,7 @@ function createStyles(c: AppTheme, isDark: boolean) {
     avatarPlaceholder: { alignItems: "center", justifyContent: "center", backgroundColor: c.primary },
     avatarInitials: { color: "#fff", fontSize: 42, fontWeight: "900", fontFamily: FONT.serif },
     badgeOnAvatar: { position: "absolute", bottom: 6, right: 2 },
-    actions: { flex: 1, flexDirection: "row", justifyContent: "flex-end", paddingBottom: 10 },
+    actions: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 10, paddingBottom: 10 },
     editBtn: {
       flexDirection: "row",
       alignItems: "center",

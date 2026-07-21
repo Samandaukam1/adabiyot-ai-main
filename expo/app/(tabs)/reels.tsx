@@ -2,7 +2,6 @@ import { BlurView } from "expo-blur";
 import * as ImagePicker from "expo-image-picker";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
-import * as Linking from "expo-linking";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useVideoPlayer, VideoView } from "expo-video";
 import {
@@ -59,6 +58,7 @@ import { usePublicReels } from "@/hooks/useReels";
 import { openContentPreview } from "@/lib/contentNavigation";
 import {
   addReelComment,
+  fetchReelById,
   fetchReelComments,
   fetchReelLinkedWork,
   formatReelError,
@@ -76,6 +76,7 @@ import {
   type ReelMetadataUpdate,
   type ReelUploadAsset,
 } from "@/lib/reels";
+import { getPublicShareUrl } from "@/lib/shareLinks";
 import { contentTypeLabel } from "@/types/author";
 import { MentionSuggestionList, MentionText, useMentionAutocomplete } from "@/components/sozlab/MentionTextInput";
 import { resolveHandleToUserId } from "@/hooks/useMentionSearch";
@@ -129,6 +130,27 @@ export default function ReelsScreen() {
     const idx = reels.findIndex((item) => item.id === reelId);
     return idx >= 0 ? idx : 0;
   }, [reelId, reels]);
+
+  // A shared `/reels/<id>` link may point at a reel that isn't on the first
+  // page of the feed — pull that one in and put it on top so the link always
+  // lands on the reel it names.
+  const linkedReelRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!reelId || loading) return;
+    if (reels.some((item) => item.id === reelId)) return;
+    if (linkedReelRef.current === reelId) return;
+    linkedReelRef.current = reelId;
+    let cancelled = false;
+    fetchReelById(reelId, userId)
+      .then((reel) => {
+        if (cancelled || !reel) return;
+        setReels((prev) => (prev.some((item) => item.id === reel.id) ? prev : [reel, ...prev]));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [reelId, reels, loading, userId, setReels]);
 
   useEffect(() => {
     if (reels.length === 0) {
@@ -487,12 +509,13 @@ function ReelItem({
   const onShare = useCallback(async () => {
     if (busyAction) return;
     setBusyAction("share");
-    const link = Linking.createURL("/reels", { queryParams: { reelId: reel.id } });
+    // Public link — opens inside AdabiyotX when installed, on the web otherwise.
+    const link = getPublicShareUrl("reel", reel.id);
     try {
       const result = await Share.share({
         title: reel.title,
         message: [reel.title, reel.caption, link, "AdabiyotX Reels"].filter(Boolean).join("\n"),
-        url: link,
+        ...(link && Platform.OS === "ios" ? { url: link } : {}),
       });
       const shared = Platform.OS === "android" || result.action === Share.sharedAction;
       if (shared) {
@@ -986,11 +1009,11 @@ function ReelCommentMode({
   }, [busyLike, currentUserId]);
 
   const onShare = useCallback(async (comment: ReelComment) => {
-    const link = Linking.createURL("/reels", { queryParams: { reelId: reel.id } });
+    const link = getPublicShareUrl("reel", reel.id);
     try {
       await Share.share({
         message: [`"${comment.content}"`, `— ${comment.authorName ?? "AdabiyotX"}`, link, "AdabiyotX Reels"].filter(Boolean).join("\n"),
-        url: link,
+        ...(link && Platform.OS === "ios" ? { url: link } : {}),
       });
     } catch {}
   }, [reel.id]);
