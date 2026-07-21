@@ -13,7 +13,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { ChevronLeft, Search, X } from "lucide-react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -72,6 +72,8 @@ export interface TaxonomyBrowseScreenProps {
   emptyListText: string;
   emptyDetailText: string;
   backToListLabel: string;
+  /** Open straight into this entry (deep link / "Barchasi" from a home row). */
+  initialSlug?: string;
 }
 
 export default function TaxonomyBrowseScreen({
@@ -86,12 +88,25 @@ export default function TaxonomyBrowseScreen({
   emptyListText,
   emptyDetailText,
   backToListLabel,
+  initialSlug,
 }: TaxonomyBrowseScreenProps) {
   const insets = useSafeAreaInsets();
   const { colors: c, isDark } = useTheme();
   const styles = useMemo(() => createStyles(c, isDark), [c, isDark]);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<TaxonomyEntry | null>(null);
+  // `entries` arrives after the first render (two async loads), so resolve the
+  // deep-linked slug once it appears — and only once, so tapping "back to list"
+  // isn't immediately undone.
+  const appliedInitialRef = useRef(false);
+  useEffect(() => {
+    if (appliedInitialRef.current || !initialSlug || entries.length === 0) return;
+    const match = entries.find((e) => e.slug === initialSlug);
+    if (match) {
+      appliedInitialRef.current = true;
+      setSelected(match);
+    }
+  }, [initialSlug, entries]);
 
   const filtered = useMemo(() => {
     const q = normalizeTaxonomyName(query);

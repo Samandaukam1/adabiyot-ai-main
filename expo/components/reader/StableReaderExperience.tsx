@@ -30,6 +30,8 @@ import {
   View,
   ViewToken,
 } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { runOnJS } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { FONT, PressableScale } from "@/components/ui";
 import { useBranding } from "@/providers/BrandingProvider";
@@ -523,6 +525,9 @@ export default function StableReaderExperience() {
   } = useApp();
 
   const [showControls, setShowControls] = useState(true);
+  // Chrome fades + slides instead of hard-cutting, and stays mounted so the
+  // hide animation can actually play out.
+  const chromeAnim = useRef(new Animated.Value(1)).current;
   const [showSettings, setShowSettings] = useState(false);
   const [showContents, setShowContents] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
@@ -1011,15 +1016,33 @@ export default function StableReaderExperience() {
   // exclusive with the pan. A Pressable here must not merely skip `onPress` — it
   // still claims the RN responder and swallows that gesture, which is what left
   // the chrome stuck on screen. Under the flip engine we render a plain View.
-  const usingFlip = ENABLE_PAGE_FLIP && Platform.OS !== "web" && pages.length > 0;
+
+  // ONE tap owner for the whole reading surface, so hide/show behaves the same
+  // on the cover, the first page, the last page and mid-flip. A drag (page turn)
+  // moves far past maxDistance so this never fires on a swipe, and the chrome
+  // buttons live in absolutely-positioned bars ABOVE this view, so tapping them
+  // never toggles by accident.
+  const contentTapGesture = useMemo(
+    () =>
+      Gesture.Tap()
+        .maxDuration(600)
+        .maxDistance(24)
+        .shouldCancelWhenOutside(false)
+        .onEnd((_event, success) => {
+          "worklet";
+          if (success) runOnJS(handlePageTap)();
+        }),
+    [handlePageTap]
+  );
 
   const renderPage = useCallback(
     ({ item, index }: { item: Page; index: number }) => {
-      const PageBox: any = usingFlip ? View : Pressable;
+      // Plain View, never a Pressable: the content-level GestureDetector owns the
+      // chrome toggle, and a Pressable claims the RN responder even with no
+      // onPress — which is what swallowed the tap gesture.
       if (item.isCover) {
         return (
-          <PageBox
-            onPress={usingFlip ? undefined : handlePageTap}
+          <View
             style={[
               styles.page,
               {
@@ -1060,12 +1083,11 @@ export default function StableReaderExperience() {
                 />
               </View>
             </View>
-          </PageBox>
+          </View>
         );
       }
       return (
-      <PageBox
-        onPress={usingFlip ? undefined : handlePageTap}
+      <View
         style={[
           styles.page,
           {
@@ -1143,7 +1165,7 @@ export default function StableReaderExperience() {
             </View>
           </View>
         </View>
-      </PageBox>
+      </View>
       );
     },
     [
@@ -1171,12 +1193,18 @@ export default function StableReaderExperience() {
       pageTheme.selection,
       pageTheme.text,
       pageTheme.textMuted,
-      handlePageTap,
-      usingFlip,
       selection,
       totalPages,
     ]
   );
+
+  useEffect(() => {
+    Animated.timing(chromeAnim, {
+      toValue: showControls ? 1 : 0,
+      duration: 200,
+      useNativeDriver: true,
+    }).start();
+  }, [showControls, chromeAnim]);
 
   if (!book) return null;
 
@@ -1187,8 +1215,10 @@ export default function StableReaderExperience() {
         style={StyleSheet.absoluteFillObject}
       />
 
+      <GestureDetector gesture={contentTapGesture}>
       <View
         style={{ flex: 1 }}
+        collapsable={false}
         onLayout={(event) => {
           // Subtract: top padding (insets.top+84) + bottom padding (insets.bottom+138) + pageInner paddingTop(30) + footer(~50)
           const overhead = insets.top + insets.bottom + 302;
@@ -1202,7 +1232,6 @@ export default function StableReaderExperience() {
             pages={pages}
             currentPage={pageIndex}
             onPageChange={handleFlipPageChange}
-            onTap={handlePageTap}
             renderPage={renderPage}
             pageWidth={PAGE_W}
           />
@@ -1212,7 +1241,6 @@ export default function StableReaderExperience() {
             pages={pages}
             currentPage={pageIndex}
             onPageChange={handleFlipPageChange}
-            onTap={handlePageTap}
             renderPage={renderPage}
             fallback={
               <FlatList
@@ -1238,11 +1266,28 @@ export default function StableReaderExperience() {
           />
         )}
       </View>
+      </GestureDetector>
 
-      {showControls ? (
+      <Animated.View
+        pointerEvents={showControls ? "auto" : "none"}
+        style={[
+          styles.topOverlay,
+          {
+            opacity: chromeAnim,
+            transform: [
+              {
+                translateY: chromeAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [-24, 0],
+                }),
+              },
+            ],
+          },
+        ]}
+      >
         <LinearGradient
           colors={[pageTheme.chrome, "transparent"]}
-          style={[styles.topOverlay, { paddingTop: insets.top + 8 }]}
+          style={{ paddingTop: insets.top + 8, paddingBottom: 14 }}
         >
           <View style={styles.topRow}>
             <Pressable
@@ -1291,7 +1336,7 @@ export default function StableReaderExperience() {
             />
           </View>
         </LinearGradient>
-      ) : null}
+      </Animated.View>
 
       {book.audioAvailable ? (
         <MiniPlayer
@@ -2320,7 +2365,6 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    paddingBottom: 14,
   },
   topRow: {
     flexDirection: "row",

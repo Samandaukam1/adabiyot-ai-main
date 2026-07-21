@@ -1268,11 +1268,18 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
     Animated.timing(uiAnim, { toValue: next ? 1 : 0, duration: 220, useNativeDriver: true }).start();
   }, [uiAnim]);
 
-  // Scroll mode has no flip engine, so one Tap gesture over the whole list owns
-  // the chrome toggle. Scrolling moves the finger far past maxDistance, so this
-  // can never fire on a scroll — and unlike per-block Pressables it also covers
-  // the title page, inter-block gaps and the space below the last block.
-  const scrollTapGesture = useMemo(
+  // ONE tap owner for the entire reader content, in BOTH reading modes.
+  //
+  // The flip engine is a vendored library whose own per-page tap is gated on its
+  // internal `enabled`/`isAnimating` state, so it silently stopped firing on some
+  // pages. Owning the tap here instead makes hide/show behave identically on the
+  // first page, the last page, mid-animation, in scroll mode and in paged mode.
+  //
+  // A page-turn drag or a scroll moves the finger far past maxDistance, so this
+  // can never fire on a swipe; the flip engine's pan still wins every real drag.
+  // Chrome buttons sit in absolutely-positioned bars ABOVE this view, so they
+  // receive their own touches and never toggle by accident.
+  const contentTapGesture = useMemo(
     () =>
       Gesture.Tap()
         .maxDuration(600)
@@ -1284,10 +1291,6 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
         }),
     [toggleUI]
   );
-
-  // Page-flip owns clean taps while active. Keeping page Pressables passive in
-  // this mode prevents a swipe from also toggling the top/bottom chrome.
-  const usingFlip = ENABLE_PAGE_FLIP && Platform.OS !== "web" && pages.length > 0;
 
   const scrollToPage = useCallback(
     (pageIndex: number, animated = true) => {
@@ -1384,15 +1387,12 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
       // Branding title page (logo · nom · muallif · yil). Same Pressable wrapper
       // as content pages, so tap-to-toggle controls behaves identically.
       if (page.isTitle) {
-        // While the flip engine is active it owns taps via its own RNGH gesture.
-        // A Pressable here — even with `onPress` undefined — still claims the RN
-        // responder and swallows that gesture, which is what stopped the chrome
-        // from toggling. Render a plain View in that mode.
-        const PageBox: any = usingFlip ? View : Pressable;
+        // Plain View, never a Pressable: the content-level GestureDetector owns
+        // the chrome toggle. A Pressable here would claim the RN responder (it
+        // does so even with no onPress) and swallow that gesture.
         return (
-          <PageBox
+          <View
             style={[pgStyles.page, { width: SCREEN_W, backgroundColor: theme.paper, paddingTop: 0, paddingBottom: 0 }]}
-            onPress={usingFlip ? undefined : toggleUI}
           >
             <ReaderTitlePage
               logoUrl={brandingLogoUrl}
@@ -1406,7 +1406,7 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
               mutedColor={theme.textMuted}
               accentColor={theme.accent}
             />
-          </PageBox>
+          </View>
         );
       }
       // Bob boshlanayotgan sahifada birinchi paragraph indeksini topamiz (drop cap uchun)
@@ -1415,15 +1415,11 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
         ? page.blocks.findIndex((b) => b.block_type === "paragraph")
         : -1;
 
-      // Same rule as the title page: View under the flip engine, Pressable in the
-      // classic (web / fallback) list where nothing else handles the tap.
-      const PageBox: any = usingFlip ? View : Pressable;
       return (
-        // tap → UI yashirish/ko'rsatish | swipe → flip/FlatList ushlab qoladi
+        // swipe → flip/FlatList ushlab qoladi; tap → content GestureDetector
         // paddingTop/Bottom: barlar ko'rinsin-ko'rinmasin, matn har doim shu oraliqda
-        <PageBox
+        <View
           style={[pgStyles.page, { width: SCREEN_W, backgroundColor: theme.paper, paddingTop: PAGE_TOP, paddingBottom: PAGE_BOT }]}
-          onPress={usingFlip ? undefined : toggleUI}
         >
           <View style={pgStyles.content}>
             {page.blocks.map((block, idx) => {
@@ -1509,10 +1505,10 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
           <Text style={[pgStyles.pageNum, { color: theme.textMuted }]}>
             {page.pageIndex + 1}
           </Text>
-        </PageBox>
+        </View>
       );
     },
-    [book, fontSize, fontFamily, theme, highlightedAnchorId, PAGE_TOP, PAGE_BOT, brandingLogoUrl, appName, bookYear, toggleUI, usingFlip]
+    [book, fontSize, fontFamily, theme, highlightedAnchorId, PAGE_TOP, PAGE_BOT, brandingLogoUrl, appName, bookYear]
   );
 
   // Uzluksiz scroll rejimi uchun renderItem (blok bazali)
@@ -1655,14 +1651,18 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
 
   return (
     <View style={[rStyles.fill, { backgroundColor: theme.paper }]}>
-      {/* Kontent — to'liq balandlik, barlar ustidan overlay qilinadi */}
+      {/* Kontent — to'liq balandlik, barlar ustidan overlay qilinadi.
+          GestureDetector takes exactly ONE child and attaches its own ref to it,
+          so the child is a plain host View; collapsable={false} guarantees a real
+          native view on Android. */}
+      <GestureDetector gesture={contentTapGesture}>
+      <View style={rStyles.fill} collapsable={false}>
       {readingMode === "paged" ? (
         <FlipEngine
           enabled={ENABLE_PAGE_FLIP}
           pages={pages}
           currentPage={currentPageIndex}
           onPageChange={handleFlipPageChange}
-          onTap={toggleUI}
           renderPage={renderItem}
           fallback={
             <FlatList
@@ -1686,12 +1686,6 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
           }
         />
       ) : (
-        // GestureDetector takes exactly ONE child, and it attaches its own ref to
-        // it — so the child must be a plain host View, not the FlatList (which
-        // already carries scrollVertRef). collapsable={false} guarantees a real
-        // native view exists on Android.
-        <GestureDetector gesture={scrollTapGesture}>
-        <View style={rStyles.fill} collapsable={false}>
         <FlatList
           ref={scrollVertRef}
           data={blocks}
@@ -1722,9 +1716,9 @@ export default function RichBlockReader({ bookId }: RichBlockReaderProps) {
           viewabilityConfig={viewabilityConfig}
           showsVerticalScrollIndicator={false}
         />
-        </View>
-        </GestureDetector>
       )}
+      </View>
+      </GestureDetector>
 
       {/* Top bar — position:absolute, FlatList balandligiga ta'sir qilmaydi */}
       <Animated.View

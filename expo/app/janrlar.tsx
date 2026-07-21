@@ -2,6 +2,7 @@
  * "Janrlar" — the admin panel's Janr field (public.content_genres), and the
  * published books tagged with each one.
  */
+import { useLocalSearchParams } from "expo-router";
 import React, { useCallback, useMemo } from "react";
 
 import TaxonomyBrowseScreen, {
@@ -12,6 +13,9 @@ import { useContentGenres } from "@/hooks/useTaxonomy";
 import { booksInGenre, withGenreCounts, type ContentGenre } from "@/lib/taxonomy";
 
 export default function GenresScreen() {
+  // `?genre=<slug>` opens straight into that janr — the home screen's per-genre
+  // "Barchasi" links use it.
+  const { genre: genreParam } = useLocalSearchParams<{ genre?: string }>();
   const { genres, loading: genresLoading, error: genresError } = useContentGenres();
   const { books, loading: booksLoading, error: booksError } = usePublishedBooks();
 
@@ -55,6 +59,7 @@ export default function GenresScreen() {
       emptyListText="Hozircha janrlar mavjud emas."
       emptyDetailText="Bu janrda hozircha kitoblar mavjud emas."
       backToListLabel="Janrlarga qaytish"
+      initialSlug={Array.isArray(genreParam) ? genreParam[0] : genreParam}
     />
   );
 }

@@ -893,7 +893,14 @@ function CtaButton({
           <View style={styles.ctaIconCircle}>
             <MaterialCommunityIcons name={icon as any} size={18} color="#fff" />
           </View>
-          <Text style={styles.ctaButtonText}>{label}</Text>
+          <Text
+            style={styles.ctaButtonText}
+            numberOfLines={2}
+            adjustsFontSizeToFit
+            minimumFontScale={0.85}
+          >
+            {label}
+          </Text>
         </LinearGradient>
       </Pressable>
     </Animated.View>
@@ -1314,7 +1321,7 @@ function SupabaseBookDetail({
             <CtaButton
               label={
                 checkingAccess
-                  ? "Xarid holati tekshirilmoqda…"
+                  ? "Tekshirilmoqda…"
                   : purchased
                   ? "O'qishni davom ettirish"
                   : isPoem
@@ -1338,7 +1345,7 @@ function SupabaseBookDetail({
             <CtaButton
               label={
                 checkingAccess
-                  ? "Xarid holati tekshirilmoqda…"
+                  ? "Tekshirilmoqda…"
                   : purchased
                   ? "Tinglashni davom ettirish"
                   : "Audio talqin"
@@ -1726,26 +1733,45 @@ function createStyles(c: AppTheme, isDark: boolean) {
       marginTop: 2,
     },
     actionsRow: { flexDirection: "row", paddingHorizontal: 20, gap: 12, marginTop: 16 },
+    // Two of these sit side by side (each flex:1), so on a 390pt screen a button
+    // is only ~169pt wide. Labels like "Tinglashni davom ettirish" need to wrap
+    // to two lines inside that: the icon must never shrink, the text must never
+    // push the icon out, hence flexShrink on one and not the other.
     ctaEqualWrap: {
       flex: 1,
-      height: 56,
-      borderRadius: 16,
+      height: 60,
+      borderRadius: 20,
       shadowOffset: { width: 0, height: 7 },
       shadowOpacity: 0.32,
       shadowRadius: 13,
       elevation: 6,
     },
-    ctaPressable: { flex: 1, borderRadius: 16, overflow: "hidden" },
-    ctaButton: { flex: 1, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 9 },
+    ctaPressable: { flex: 1, borderRadius: 20, overflow: "hidden" },
+    ctaButton: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      flexDirection: "row",
+      gap: 8,
+      paddingHorizontal: 11,
+    },
     ctaIconCircle: {
-      width: 28,
-      height: 28,
-      borderRadius: 14,
+      width: 30,
+      height: 30,
+      borderRadius: 15,
+      flexShrink: 0,
       backgroundColor: "rgba(255,255,255,0.22)",
       alignItems: "center",
       justifyContent: "center",
     },
-    ctaButtonText: { color: "#FFFFFF", fontSize: 15, fontWeight: "800", letterSpacing: 0.2 },
+    ctaButtonText: {
+      flexShrink: 1,
+      color: "#FFFFFF",
+      fontSize: 14,
+      lineHeight: 17,
+      fontWeight: "800",
+      letterSpacing: 0.1,
+    },
     stickyCtaWrap: {
       position: "absolute",
       left: 0,

@@ -39,7 +39,6 @@ import {
 } from "@/components/animations";
 import { PullRefreshIndicator } from "@/components/PullRefreshIndicator";
 import ExploreShortcutButtons from "@/components/ExploreShortcutButtons";
-import TaxonomyShortcutButtons from "@/components/TaxonomyShortcutButtons";
 import ArticleHomeCard from "@/components/ArticleHomeCard";
 import HomeHeroAdCard from "@/components/HomeHeroAdCard";
 import BookCover from "@/components/BookCover";
@@ -489,6 +488,62 @@ const BookGridCard = memo(function BookGridCard({ book, onPress }: { book: Displ
   );
 });
 
+// ─── Genre row section ─────────────────────────────────────────────────────────
+/** Title + "Barchasi" + a horizontal shelf of the books in one janr. */
+const GenreRowSection = memo(function GenreRowSection({
+  title,
+  books,
+  delay,
+  onBook,
+  onSeeAll,
+  L,
+}: {
+  title: string;
+  books: DisplayBook[];
+  delay: number;
+  onBook: (id: string) => void;
+  onSeeAll: () => void;
+  L: AppTheme;
+}) {
+  if (books.length === 0) return null;
+  return (
+    <>
+      <FadeSlideIn
+        delay={delay}
+        distance={14}
+        style={{
+          flexDirection: "row",
+          justifyContent: "space-between",
+          alignItems: "baseline",
+          paddingHorizontal: 20,
+          marginBottom: 14,
+          marginTop: 28,
+        }}
+      >
+        <Text style={{ color: L.text, fontSize: 20, fontWeight: "800", fontFamily: FONT.serif, letterSpacing: -0.4 }}>
+          {title}
+        </Text>
+        <Text onPress={onSeeAll} style={{ color: L.primary, fontSize: 13, fontWeight: "600" }}>
+          Barchasi
+        </Text>
+      </FadeSlideIn>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        decelerationRate="fast"
+        snapToInterval={GRID_CELL + GRID_GAP}
+        contentContainerStyle={{ paddingHorizontal: GRID_PAD, gap: GRID_GAP, paddingBottom: 8 }}
+      >
+        {books.map((book, index) => (
+          <StaggeredCard key={book.id} index={index}>
+            <BookGridCard book={book} onPress={() => onBook(book.id)} />
+          </StaggeredCard>
+        ))}
+      </ScrollView>
+    </>
+  );
+});
+
 // ─── Skeleton ──────────────────────────────────────────────────────────────────
 const SkeletonBox = memo(function SkeletonBox({ w, h, r = 12 }: { w: number | `${number}%`; h: number; r?: number }) {
   const { colors: L } = useTheme();
@@ -700,6 +755,16 @@ function MobileHomeScreen() {
     [categories, supaBooks]
   );
 
+  // One horizontal row per JANR (content_genres) that actually has published
+  // books. Empty genres are dropped so no bare section ever renders. Hidden
+  // while a chip filter is active — the filtered row above already answers it.
+  const genreSections = useMemo(() => {
+    if (activeCat !== ALL_CHIP) return [];
+    return genres
+      .map((genre) => ({ genre, books: supaBooks.filter((b) => bookMatchesGenre(b, genre)) }))
+      .filter((section) => section.books.length > 0);
+  }, [genres, supaBooks, activeCat]);
+
   const gridBooks = useMemo(() => {
     if (activeCat === ALL_CHIP) return supaBooks.slice(0, 8);
 
@@ -900,11 +965,6 @@ function MobileHomeScreen() {
           <Text style={{ color: L.primary, fontSize: 13, fontWeight: "600" }}>Barcha asarlar</Text>
         </FadeSlideIn>
 
-        {/* ── JANRLAR / KATEGORIYALAR ─────────────────────────────────────────── */}
-        <FadeSlideIn delay={360} distance={12}>
-          <TaxonomyShortcutButtons />
-        </FadeSlideIn>
-
         {/* ── JANR CHIPS (content_genres) ─────────────────────────────────────── */}
         {genreChips.length > 1 ? (
           <SlideFromLeft delay={380}>
@@ -918,6 +978,65 @@ function MobileHomeScreen() {
             <ChipRow cats={categoryChips} active={activeCat} onSelect={setActiveCat} />
           </SlideFromRight>
         ) : null}
+
+        {/* ── BOOK GRID ────────────────────────────────────────────────────────── */}
+        <FadeSlideIn delay={580} distance={14} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", paddingHorizontal: 20, marginBottom: 14, marginTop: 28 }}>
+          <Text style={{ color: L.text, fontSize: 22, fontWeight: "800", fontFamily: FONT.serif, letterSpacing: -0.4 }}>Top asarlar</Text>
+          <Text onPress={() => router.push("/kitoblar")} style={{ color: L.primary, fontSize: 13, fontWeight: "600" }}>Barchasi</Text>
+        </FadeSlideIn>
+        <View style={{ marginTop: 4 }}>
+          {booksLoading && gridBooks.length === 0 ? (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              decelerationRate="fast"
+              snapToInterval={GRID_CELL + GRID_GAP}
+              contentContainerStyle={{ paddingHorizontal: GRID_PAD, gap: GRID_GAP, paddingBottom: 8 }}
+            >
+              {Array.from({ length: 4 }).map((_, i) => (
+                <View key={i} style={{ width: GRID_CELL }}>
+                  <SkeletonBox w={GRID_CELL} h={GRID_IMG_H} r={10} />
+                  <View style={{ marginTop: 6, gap: 4 }}>
+                    <SkeletonBox w={GRID_CELL * 0.85} h={12} r={6} />
+                    <SkeletonBox w={GRID_CELL * 0.6} h={10} r={6} />
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+          ) : gridBooks.length === 0 ? (
+            <View style={{ alignItems: "center", justifyContent: "center", paddingVertical: 40, gap: 10 }}>
+              <MaterialCommunityIcons name="book-open-variant" size={32} color={L.textMuted} />
+              <Text style={{ color: L.textMuted, fontSize: 13 }}>Bu kategoriyada kitoblar yo'q</Text>
+            </View>
+          ) : (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              decelerationRate="fast"
+              snapToInterval={GRID_CELL + GRID_GAP}
+              contentContainerStyle={{ paddingHorizontal: GRID_PAD, gap: GRID_GAP, paddingBottom: 8 }}
+            >
+              {gridBooks.map((book, index) => (
+                <StaggeredCard key={book.id} index={index}>
+                  <BookGridCard book={book} onPress={() => onBook(book.id)} />
+                </StaggeredCard>
+              ))}
+            </ScrollView>
+          )}
+        </View>
+
+        {/* ── JANRLAR BO‘YICHA ROW SECTIONLAR ──────────────────────────────── */}
+        {genreSections.map((section, index) => (
+          <GenreRowSection
+            key={section.genre.id || section.genre.slug}
+            title={section.genre.name}
+            books={section.books}
+            delay={620 + index * 60}
+            onBook={onBook}
+            onSeeAll={() => router.push(`/janrlar?genre=${encodeURIComponent(section.genre.slug)}`)}
+            L={L}
+          />
+        ))}
 
         {/* ── CAROUSEL ────────────────────────────────────────────────────────── */}
         <FadeSlideIn delay={520} distance={18} style={{ marginTop: 22 }}>
@@ -967,51 +1086,6 @@ function MobileHomeScreen() {
             </>
           ) : null}
         </FadeSlideIn>
-
-        {/* ── BOOK GRID ────────────────────────────────────────────────────────── */}
-        <FadeSlideIn delay={580} distance={14} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", paddingHorizontal: 20, marginBottom: 14, marginTop: 28 }}>
-          <Text style={{ color: L.text, fontSize: 22, fontWeight: "800", fontFamily: FONT.serif, letterSpacing: -0.4 }}>Top asarlar</Text>
-        </FadeSlideIn>
-        <View style={{ marginTop: 4 }}>
-          {booksLoading && gridBooks.length === 0 ? (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              decelerationRate="fast"
-              snapToInterval={GRID_CELL + GRID_GAP}
-              contentContainerStyle={{ paddingHorizontal: GRID_PAD, gap: GRID_GAP, paddingBottom: 8 }}
-            >
-              {Array.from({ length: 4 }).map((_, i) => (
-                <View key={i} style={{ width: GRID_CELL }}>
-                  <SkeletonBox w={GRID_CELL} h={GRID_IMG_H} r={10} />
-                  <View style={{ marginTop: 6, gap: 4 }}>
-                    <SkeletonBox w={GRID_CELL * 0.85} h={12} r={6} />
-                    <SkeletonBox w={GRID_CELL * 0.6} h={10} r={6} />
-                  </View>
-                </View>
-              ))}
-            </ScrollView>
-          ) : gridBooks.length === 0 ? (
-            <View style={{ alignItems: "center", justifyContent: "center", paddingVertical: 40, gap: 10 }}>
-              <MaterialCommunityIcons name="book-open-variant" size={32} color={L.textMuted} />
-              <Text style={{ color: L.textMuted, fontSize: 13 }}>Bu kategoriyada kitoblar yo'q</Text>
-            </View>
-          ) : (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              decelerationRate="fast"
-              snapToInterval={GRID_CELL + GRID_GAP}
-              contentContainerStyle={{ paddingHorizontal: GRID_PAD, gap: GRID_GAP, paddingBottom: 8 }}
-            >
-              {gridBooks.map((book, index) => (
-                <StaggeredCard key={book.id} index={index}>
-                  <BookGridCard book={book} onPress={() => onBook(book.id)} />
-                </StaggeredCard>
-              ))}
-            </ScrollView>
-          )}
-        </View>
 
         {/* ── MAQOLALAR (A4 ARTICLE CARDS) ────────────────────────────────────── */}
         {articleCards.length > 0 ? (
