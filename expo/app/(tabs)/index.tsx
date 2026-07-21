@@ -36,6 +36,7 @@ import {
   SlideFromRight,
   StaggeredCard,
   TypingText,
+  useReduceMotion,
 } from "@/components/animations";
 import { PullRefreshIndicator } from "@/components/PullRefreshIndicator";
 import ExploreShortcutButtons from "@/components/ExploreShortcutButtons";
@@ -70,8 +71,15 @@ const GRID_IMG_H = Math.floor(GRID_CELL * 1.46);
 
 // Chips are built from the LIVE taxonomy (public.content_genres /
 // public.content_categories) — the same rows the admin panel tags books with.
-// The only hardcoded entry is the "Hammasi" reset chip.
+// The only hardcoded entries are the "Hammasi" reset chip and the special
+// "Eng yangi" filter, which is a frontend-only view over the freshest published
+// books rather than a taxonomy row.
 const ALL_CHIP = "Hammasi";
+const LATEST_CHIP = "Eng yangi";
+
+/** How many books the newest-first carousel shows in each of its two slots. */
+const CAROUSEL_LIMIT = 5;
+const LATEST_CAROUSEL_LIMIT = 10;
 
 type Cat = string;
 
@@ -127,10 +135,13 @@ const ChipRow = memo(function ChipRow({
   cats,
   active,
   onSelect,
+  leading,
 }: {
   cats: readonly string[];
   active: Cat;
   onSelect: (c: Cat) => void;
+  /** Rendered before the taxonomy chips — used for the "Eng yangi" chip. */
+  leading?: React.ReactNode;
 }) {
   const { colors: L } = useTheme();
   return (
@@ -139,6 +150,7 @@ const ChipRow = memo(function ChipRow({
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={chipRowStyle}
     >
+      {leading}
       {cats.map((c) => {
         const isActive = active === c;
         const iconName = TAXONOMY_ICONS[c] ?? DEFAULT_CHIP_ICON;
@@ -165,6 +177,95 @@ const ChipRow = memo(function ChipRow({
         );
       })}
     </ScrollView>
+  );
+});
+
+/**
+ * The special first chip of the kategoriya row. It sits behind a soft brand-green
+ * halo that breathes on a ~2.2s loop, so it reads as the shortcut to the newest
+ * books without out-shouting the taxonomy chips next to it. Opacity + scale only,
+ * so the loop stays on the native driver (and degrades to a plain glow on web /
+ * with Reduce Motion on).
+ */
+const LatestChip = memo(function LatestChip({
+  active,
+  onPress,
+}: {
+  active: boolean;
+  onPress: () => void;
+}) {
+  const { colors: L } = useTheme();
+  const reduceMotion = useReduceMotion();
+  const pulse = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (reduceMotion) {
+      pulse.setValue(0.5);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 1100,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 0,
+          duration: 1100,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulse, reduceMotion]);
+
+  const glowOpacity = pulse.interpolate({
+    inputRange: [0, 1],
+    outputRange: active ? [0.55, 1] : [0.3, 0.68],
+  });
+  const glowScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.98, 1.05] });
+
+  return (
+    <View style={styles.latestChipWrap}>
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.latestChipGlow,
+          {
+            backgroundColor: active ? L.primary : L.soft,
+            shadowColor: L.primary,
+            opacity: glowOpacity,
+            transform: [{ scale: glowScale }],
+          },
+        ]}
+      />
+      <AnimatedPressable
+        onPress={onPress}
+        pressedScale={0.91}
+        style={[
+          chipBase(L),
+          {
+            backgroundColor: active ? L.primary : L.bgCard,
+            borderColor: L.primary,
+            shadowOpacity: 0,
+            elevation: 0,
+          },
+        ]}
+      >
+        <MaterialCommunityIcons
+          name="star-four-points"
+          size={13}
+          color={active ? "#fff" : L.primary}
+        />
+        <Text style={{ color: active ? "#fff" : L.primary, fontSize: 12, fontWeight: "800" }}>
+          {LATEST_CHIP}
+        </Text>
+      </AnimatedPressable>
+    </View>
   );
 });
 
@@ -560,9 +661,24 @@ const SkeletonBox = memo(function SkeletonBox({ w, h, r = 12 }: { w: number | `$
 });
 
 // ─── Style helpers ─────────────────────────────────────────────────────────────
-const chipRowStyle = { paddingHorizontal: 16, gap: 8 };
+// The vertical padding is what keeps the "Eng yangi" halo from being clipped by
+// the horizontal ScrollView on Android.
+const chipRowStyle = { paddingHorizontal: 16, paddingVertical: 7, gap: 8, alignItems: "center" as const };
 
 const styles = StyleSheet.create({
+  latestChipWrap: { paddingHorizontal: 3 },
+  latestChipGlow: {
+    position: "absolute",
+    top: 1,
+    left: 5,
+    right: 5,
+    bottom: 1,
+    borderRadius: 20,
+    shadowOpacity: 0.6,
+    shadowRadius: 11,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 7,
+  },
   lastReadGlowFrame: {
     marginHorizontal: 13,
     padding: 3,
@@ -716,6 +832,23 @@ function MobileHomeScreen() {
   const carouselScrollRef = useRef<ScrollView>(null);
   const dragStartXRef = useRef(0);
   const lastCarouselIdxRef = useRef(0);
+  const pageScrollRef = useRef<ScrollView>(null);
+  // Where the "Adabiyotlar" block starts, so tapping "Eng yangi" can bring the
+  // newest shelf into view instead of leaving it below the fold.
+  const adabiyotlarYRef = useRef(0);
+
+  const handleSelectCat = useCallback(
+    (cat: Cat) => {
+      setActiveCat(cat);
+      if (cat !== LATEST_CHIP) return;
+      // Land the section title just under the status bar, not behind it.
+      pageScrollRef.current?.scrollTo({
+        y: Math.max(0, adabiyotlarYRef.current - insets.top - 8),
+        animated: true,
+      });
+    },
+    [insets.top]
+  );
 
   useEffect(() => {
     AsyncStorage.multiGet([
@@ -730,7 +863,14 @@ function MobileHomeScreen() {
       .catch(() => {});
   }, [userId]);
 
-  const newBooks = useMemo(() => supaBooks.slice(0, 5), [supaBooks]);
+  // "Eng yangi" is a frontend-only filter: `supaBooks` already arrives
+  // newest-first (published_at desc, created_at as the fallback), so the latest
+  // shelf is just the head of that list — no separate query, no mock data.
+  const isLatestSelected = activeCat === LATEST_CHIP;
+  const newBooks = useMemo(
+    () => supaBooks.slice(0, isLatestSelected ? LATEST_CAROUSEL_LIMIT : CAROUSEL_LIMIT),
+    [supaBooks, isLatestSelected]
+  );
 
   const lastReadBook = useMemo(
     () => (lastBookId ? (supaBooks.find((b) => b.id === lastBookId) ?? null) : null),
@@ -747,6 +887,8 @@ function MobileHomeScreen() {
     [genres, supaBooks]
   );
 
+  // The "Eng yangi" chip is prepended separately (see `leading` on ChipRow) so it
+  // always stays first, even before the taxonomy has loaded.
   const categoryChips = useMemo(
     () =>
       categories
@@ -759,14 +901,15 @@ function MobileHomeScreen() {
   // books. Empty genres are dropped so no bare section ever renders. Hidden
   // while a chip filter is active — the filtered row above already answers it.
   const genreSections = useMemo(() => {
-    if (activeCat !== ALL_CHIP) return [];
+    if (activeCat !== ALL_CHIP && activeCat !== LATEST_CHIP) return [];
     return genres
       .map((genre) => ({ genre, books: supaBooks.filter((b) => bookMatchesGenre(b, genre)) }))
       .filter((section) => section.books.length > 0);
   }, [genres, supaBooks, activeCat]);
 
   const gridBooks = useMemo(() => {
-    if (activeCat === ALL_CHIP) return supaBooks.slice(0, 8);
+    // "Eng yangi" only reorders the page — Top asarlar keeps its full shelf.
+    if (activeCat === ALL_CHIP || activeCat === LATEST_CHIP) return supaBooks.slice(0, 8);
 
     const genre = genres.find((g) => g.name === activeCat);
     if (genre) return supaBooks.filter((b) => bookMatchesGenre(b, genre)).slice(0, 8);
@@ -776,6 +919,14 @@ function MobileHomeScreen() {
 
     return [];
   }, [activeCat, supaBooks, genres, categories]);
+
+  // The carousel remounts when it swaps between its default slot and the top of
+  // the Adabiyotlar block, so start it back at the first (newest) book.
+  useEffect(() => {
+    setCarouselIdx(0);
+    lastCarouselIdxRef.current = 0;
+    carouselScrollRef.current?.scrollTo({ x: 0, y: 0, animated: false });
+  }, [isLatestSelected]);
 
   useEffect(() => {
     if (prevIdxRef.current === carouselIdx) return;
@@ -853,10 +1004,68 @@ function MobileHomeScreen() {
   const today = new Date();
   const dateStr = today.toLocaleDateString("uz-UZ", { weekday: "long", day: "numeric", month: "long" });
 
+  /**
+   * The newest-books carousel. It lives in exactly ONE place at a time: at the
+   * top of the Adabiyotlar block while "Eng yangi" is selected, in its usual
+   * slot further down otherwise.
+   */
+  const renderLatestCarousel = () => {
+    if (booksLoading && newBooks.length === 0) {
+      return (
+        <View style={{ paddingHorizontal: cPad, gap: cGap, flexDirection: "row" }}>
+          {[0, 1, 2].map((i) => <SkeletonBox key={i} w={cW} h={cH} r={24} />)}
+        </View>
+      );
+    }
+    if (newBooks.length === 0) return null;
+    return (
+      <>
+        <ScrollView
+          ref={carouselScrollRef}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          snapToOffsets={newBooks.map((_, i) => i * carouselStep)}
+          disableIntervalMomentum
+          decelerationRate="fast"
+          style={{ height: cH }}
+          contentContainerStyle={{ paddingHorizontal: cPad }}
+          onScrollBeginDrag={handleCarouselBeginDrag}
+          onScrollEndDrag={handleCarouselEndDrag}
+          onMomentumScrollEnd={handleCarouselMomentumEnd}
+          scrollEventThrottle={16}
+        >
+          {newBooks.map((book, index) => (
+            <CarouselItem
+              key={book.id}
+              book={book}
+              isActive={index === carouselIdx}
+              cW={cW}
+              cH={cH}
+              marginRight={index < newBooks.length - 1 ? cGap : 0}
+              onPress={() => onBook(book.id)}
+            />
+          ))}
+        </ScrollView>
+
+        <View style={{ flexDirection: "row", justifyContent: "center", gap: 5, marginTop: 16 }}>
+          {newBooks.map((_, i) => (
+            <View key={i} style={[{ width: 6, height: 6, borderRadius: 3, backgroundColor: L.surface }, i === carouselIdx && { width: 22, height: 6, backgroundColor: L.primary }]} />
+          ))}
+        </View>
+
+        <Animated.View style={{ alignItems: "center", marginTop: 12, paddingHorizontal: 40, marginBottom: 4, opacity: titleOpacity }}>
+          <Text numberOfLines={1} style={{ color: L.text, fontSize: 18, fontWeight: "800", fontFamily: FONT.serif, textAlign: "center", letterSpacing: -0.3 }}>{newBooks[carouselIdx]?.title ?? ""}</Text>
+          <Text numberOfLines={1} style={{ color: L.primary, fontSize: 13, fontWeight: "600", marginTop: 4, textAlign: "center" }}>{newBooks[carouselIdx]?.authorName ?? ""}</Text>
+        </Animated.View>
+      </>
+    );
+  };
+
   return (
     <ScreenTransitionWrapper type="up" style={{ backgroundColor: L.bg }} replayKey={replayKey}>
     <View style={{ flex: 1, backgroundColor: L.bg }}>
       <ScrollView
+        ref={pageScrollRef}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 110 }}
         refreshControl={
@@ -960,23 +1169,44 @@ function MobileHomeScreen() {
         </FadeSlideIn>
 
         {/* ── ADABIYOTLAR SECTION ─────────────────────────────────────────────── */}
-        <FadeSlideIn delay={320} distance={14} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", paddingHorizontal: 20, marginBottom: 12, marginTop: 18 }}>
-          <Text style={{ color: L.text, fontSize: 22, fontWeight: "800", fontFamily: FONT.serif, letterSpacing: -0.4 }}>Adabiyotlar</Text>
-          <Text style={{ color: L.primary, fontSize: 13, fontWeight: "600" }}>Barcha asarlar</Text>
-        </FadeSlideIn>
+        <View onLayout={(e) => { adabiyotlarYRef.current = e.nativeEvent.layout.y; }}>
+          <FadeSlideIn delay={320} distance={14} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", paddingHorizontal: 20, marginBottom: 12, marginTop: 18 }}>
+            <Text style={{ color: L.text, fontSize: 22, fontWeight: "800", fontFamily: FONT.serif, letterSpacing: -0.4 }}>Adabiyotlar</Text>
+            <Text onPress={() => router.push("/kitoblar")} style={{ color: L.primary, fontSize: 13, fontWeight: "600" }}>Barcha asarlar</Text>
+          </FadeSlideIn>
+        </View>
 
         {/* ── JANR CHIPS (content_genres) ─────────────────────────────────────── */}
         {genreChips.length > 1 ? (
           <SlideFromLeft delay={380}>
-            <ChipRow cats={genreChips} active={activeCat} onSelect={setActiveCat} />
+            <ChipRow cats={genreChips} active={activeCat} onSelect={handleSelectCat} />
           </SlideFromLeft>
         ) : null}
 
-        {/* ── KATEGORIYA CHIPS (content_categories) ───────────────────────────── */}
-        {categoryChips.length > 0 ? (
-          <SlideFromRight delay={460} style={{ marginTop: 8 }}>
-            <ChipRow cats={categoryChips} active={activeCat} onSelect={setActiveCat} />
-          </SlideFromRight>
+        {/* ── KATEGORIYA CHIPS ("Eng yangi" + content_categories) ─────────────── */}
+        <SlideFromRight delay={460} style={{ marginTop: 4 }}>
+          <ChipRow
+            cats={categoryChips}
+            active={activeCat}
+            onSelect={handleSelectCat}
+            leading={
+              <LatestChip
+                active={isLatestSelected}
+                onPress={() => handleSelectCat(isLatestSelected ? ALL_CHIP : LATEST_CHIP)}
+              />
+            }
+          />
+        </SlideFromRight>
+
+        {/* ── ENG YANGI CAROUSEL (only while that chip is selected) ───────────── */}
+        {isLatestSelected ? (
+          <FadeSlideIn delay={80} distance={16} style={{ marginTop: 14 }}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", paddingHorizontal: 20, marginBottom: 14 }}>
+              <Text style={{ color: L.text, fontSize: 20, fontWeight: "800", fontFamily: FONT.serif, letterSpacing: -0.4 }}>Eng yangi adabiyotlar</Text>
+              <Text onPress={() => router.push("/kitoblar")} style={{ color: L.primary, fontSize: 13, fontWeight: "600" }}>Barchasi</Text>
+            </View>
+            {renderLatestCarousel()}
+          </FadeSlideIn>
         ) : null}
 
         {/* ── BOOK GRID ────────────────────────────────────────────────────────── */}
@@ -1038,54 +1268,12 @@ function MobileHomeScreen() {
           />
         ))}
 
-        {/* ── CAROUSEL ────────────────────────────────────────────────────────── */}
-        <FadeSlideIn delay={520} distance={18} style={{ marginTop: 22 }}>
-          {booksLoading && newBooks.length === 0 ? (
-            <View style={{ paddingHorizontal: cPad, gap: cGap, flexDirection: "row" }}>
-              {[0, 1, 2].map((i) => <SkeletonBox key={i} w={cW} h={cH} r={24} />)}
-            </View>
-          ) : newBooks.length > 0 ? (
-            <>
-              <ScrollView
-                ref={carouselScrollRef}
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                snapToOffsets={newBooks.map((_, i) => i * carouselStep)}
-                disableIntervalMomentum
-                decelerationRate="fast"
-                style={{ height: cH }}
-                contentContainerStyle={{ paddingHorizontal: cPad }}
-                onScrollBeginDrag={handleCarouselBeginDrag}
-                onScrollEndDrag={handleCarouselEndDrag}
-                onMomentumScrollEnd={handleCarouselMomentumEnd}
-                scrollEventThrottle={16}
-              >
-                {newBooks.map((book, index) => (
-                  <CarouselItem
-                    key={book.id}
-                    book={book}
-                    isActive={index === carouselIdx}
-                    cW={cW}
-                    cH={cH}
-                    marginRight={index < newBooks.length - 1 ? cGap : 0}
-                    onPress={() => onBook(book.id)}
-                  />
-                ))}
-              </ScrollView>
-
-              <View style={{ flexDirection: "row", justifyContent: "center", gap: 5, marginTop: 16 }}>
-                {newBooks.map((_, i) => (
-                  <View key={i} style={[{ width: 6, height: 6, borderRadius: 3, backgroundColor: L.surface }, i === carouselIdx && { width: 22, height: 6, backgroundColor: L.primary }]} />
-                ))}
-              </View>
-
-              <Animated.View style={{ alignItems: "center", marginTop: 12, paddingHorizontal: 40, marginBottom: 4, opacity: titleOpacity }}>
-                <Text numberOfLines={1} style={{ color: L.text, fontSize: 18, fontWeight: "800", fontFamily: FONT.serif, textAlign: "center", letterSpacing: -0.3 }}>{newBooks[carouselIdx]?.title ?? ""}</Text>
-                <Text numberOfLines={1} style={{ color: L.primary, fontSize: 13, fontWeight: "600", marginTop: 4, textAlign: "center" }}>{newBooks[carouselIdx]?.authorName ?? ""}</Text>
-              </Animated.View>
-            </>
-          ) : null}
-        </FadeSlideIn>
+        {/* ── CAROUSEL (default slot — moves up when "Eng yangi" is on) ───────── */}
+        {isLatestSelected ? null : (
+          <FadeSlideIn delay={520} distance={18} style={{ marginTop: 22 }}>
+            {renderLatestCarousel()}
+          </FadeSlideIn>
+        )}
 
         {/* ── MAQOLALAR (A4 ARTICLE CARDS) ────────────────────────────────────── */}
         {articleCards.length > 0 ? (

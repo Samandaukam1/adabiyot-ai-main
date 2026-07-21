@@ -44,10 +44,18 @@ export function parseDeepLink(raw: string): { segments: string[]; query: Record<
   let s = raw ?? "";
   const schemeIdx = s.indexOf("://");
   if (schemeIdx >= 0) s = s.slice(schemeIdx + 3);
+
+  // The fragment comes off FIRST: an implicit-flow OAuth callback keeps its
+  // tokens there (`…/auth/callback#access_token=…`), and they have to be read
+  // as params — never as part of the path.
+  const hashIdx = s.indexOf("#");
+  const fragment = hashIdx >= 0 ? s.slice(hashIdx + 1) : "";
+  if (hashIdx >= 0) s = s.slice(0, hashIdx);
+
   const [pathPart = "", queryPart = ""] = s.split("?");
   const segments = pathPart.split("/").filter(Boolean);
   const query: Record<string, string> = {};
-  for (const pair of queryPart.split("&")) {
+  for (const pair of `${queryPart}&${fragment}`.split("&")) {
     if (!pair) continue;
     const eq = pair.indexOf("=");
     const key = eq >= 0 ? pair.slice(0, eq) : pair;
@@ -70,8 +78,30 @@ export function parseDeepLink(raw: string): { segments: string[]; query: Record<
 export function isAuthCallbackLink(rawPath: string): boolean {
   const raw = rawPath ?? "";
   if (/[#&?](access_token|refresh_token|error_code)=/.test(raw)) return true;
+  // `auth` is not always segment 0 — a universal link keeps the host in front
+  // (`https://adabiyotx.uz/auth/callback?code=…`).
   const { segments } = parseDeepLink(raw);
-  return segments[0] === "auth" && segments[1] === "callback";
+  const authIdx = segments.indexOf("auth");
+  return authIdx >= 0 && segments[authIdx + 1] === "callback";
+}
+
+/** In-app route for the auth callback screen. */
+export const AUTH_CALLBACK_ROUTE = "/auth/callback";
+
+/**
+ * Normalise an incoming OAuth callback link into a router path the app can
+ * actually navigate to — `adabiyotx://auth/callback#access_token=…` becomes
+ * `/auth/callback?access_token=…`, so the screen reads everything through the
+ * usual search params no matter whether the provider used the query or the
+ * fragment.
+ */
+export function authCallbackRoutePath(rawUrl: string): string {
+  const { query } = parseDeepLink(rawUrl);
+  const search = Object.entries(query)
+    .filter(([key, value]) => key && value !== undefined)
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+    .join("&");
+  return search ? `${AUTH_CALLBACK_ROUTE}?${search}` : AUTH_CALLBACK_ROUTE;
 }
 
 /**

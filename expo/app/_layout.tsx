@@ -165,6 +165,7 @@ function RootLayoutNav() {
         }}
       >
         <Stack.Screen name="auth" options={HIDDEN_HEADER_OPTIONS} />
+        <Stack.Screen name="auth/callback" options={HIDDEN_HEADER_OPTIONS} />
         <Stack.Screen name="(tabs)" options={HIDDEN_HEADER_OPTIONS} />
         <Stack.Screen name="book/[id]" options={HIDDEN_HEADER_OPTIONS} />
         <Stack.Screen name="book-ai/[id]" options={HIDDEN_HEADER_OPTIONS} />

@@ -23,7 +23,7 @@ const DEFAULT_SPRING = {
   mass: 0.85,
 };
 
-function useReduceMotion() {
+export function useReduceMotion() {
   const [reduceMotion, setReduceMotion] = useState(false);
 
   useEffect(() => {

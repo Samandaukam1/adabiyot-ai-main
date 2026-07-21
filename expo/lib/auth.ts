@@ -1,5 +1,4 @@
 import * as AppleAuthentication from "expo-apple-authentication";
-import { makeRedirectUri } from "expo-auth-session";
 import { getQueryParams } from "expo-auth-session/build/QueryParams";
 import * as WebBrowser from "expo-web-browser";
 import type { Session } from "@supabase/supabase-js";
@@ -34,6 +33,11 @@ const FALLBACK_DISPLAY_NAME = "Kitobxon";
  * what silently breaks Google sign-in in a TestFlight/App Store build (the
  * in-app browser opens, the user signs in, but the redirect never reaches us).
  *
+ * The callback is HARDCODED on purpose. `makeRedirectUri()` derives the URI from
+ * the running bundler/host, so a dev-server artefact (`exp://…`, `http://…:8081`)
+ * can leak into a real build and the provider then bounces the user to a dead
+ * page in Safari instead of back into the app.
+ *
  * Supabase Dashboard → Authentication → URL Configuration → Redirect URLs must
  * allow all three of:
  *   adabiyotx://auth/callback
@@ -42,10 +46,19 @@ const FALLBACK_DISPLAY_NAME = "Kitobxon";
  */
 const APP_SCHEME = "adabiyotx";
 const AUTH_CALLBACK_PATH = "auth/callback";
+const WEB_AUTH_CALLBACK_URL = `https://adabiyotx.uz/${AUTH_CALLBACK_PATH}`;
+const NATIVE_AUTH_CALLBACK_URL = `${APP_SCHEME}://${AUTH_CALLBACK_PATH}`;
 
-function getAuthRedirectUri(): string {
-  if (Platform.OS === "web") return makeRedirectUri({ path: AUTH_CALLBACK_PATH });
-  return makeRedirectUri({ scheme: APP_SCHEME, path: AUTH_CALLBACK_PATH });
+/**
+ * Where the provider must send the user back to.
+ *  • native (iOS/Android, incl. TestFlight) → always the custom scheme.
+ *  • web → the callback on the SAME origin the site is served from, which in
+ *    production resolves to exactly {@link WEB_AUTH_CALLBACK_URL}.
+ */
+export function getAuthRedirectUri(): string {
+  if (Platform.OS !== "web") return NATIVE_AUTH_CALLBACK_URL;
+  const origin = typeof window !== "undefined" ? window.location?.origin : null;
+  return origin ? `${origin}/${AUTH_CALLBACK_PATH}` : WEB_AUTH_CALLBACK_URL;
 }
 
 function firstNonEmpty(...values: (string | null | undefined)[]): string | null {
@@ -58,18 +71,48 @@ function firstNonEmpty(...values: (string | null | undefined)[]): string | null 
 
 /* ─────────────────────────────  SIGN IN  ────────────────────────────── */
 
-/** Parse the OAuth redirect URL and hand the tokens to Supabase. */
-async function createSessionFromUrl(url: string): Promise<Session | null> {
+/** Everything an OAuth callback can carry, from the query AND the fragment. */
+export type AuthCallbackParams = Record<string, string | undefined>;
+
+/**
+ * Turn the params of an OAuth callback into a session. Handles BOTH shapes the
+ * provider can hand back, so the flow keeps working whichever one Supabase is
+ * configured for:
+ *   …/auth/callback#access_token=…&refresh_token=…   (implicit)
+ *   …/auth/callback?code=…                           (PKCE)
+ * Returns `null` when the callback carries neither.
+ */
+export async function createSessionFromParams(
+  params: AuthCallbackParams
+): Promise<Session | null> {
+  const providerError = firstNonEmpty(params.error_description, params.error);
+  if (providerError) throw new Error(providerError);
+
+  const { access_token, refresh_token, code } = params;
+
+  if (access_token) {
+    const { data, error } = await supabase.auth.setSession({
+      access_token,
+      refresh_token: refresh_token ?? "",
+    });
+    if (error) throw error;
+    return data.session;
+  }
+
+  if (code) {
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+    if (error) throw error;
+    return data.session;
+  }
+
+  return null;
+}
+
+/** Parse an OAuth redirect URL (query or `#fragment`) and hand it to Supabase. */
+export async function createSessionFromUrl(url: string): Promise<Session | null> {
   const { params, errorCode } = getQueryParams(url);
   if (errorCode) throw new Error(errorCode);
-  const { access_token, refresh_token } = params;
-  if (!access_token) return null;
-  const { data, error } = await supabase.auth.setSession({
-    access_token,
-    refresh_token,
-  });
-  if (error) throw error;
-  return data.session;
+  return createSessionFromParams(params);
 }
 
 export interface SignInResult {

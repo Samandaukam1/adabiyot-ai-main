@@ -1,4 +1,4 @@
-import { isAuthCallbackLink, resolveDeepLinkPath } from "@/lib/deepLink";
+import { authCallbackRoutePath, isAuthCallbackLink, resolveDeepLinkPath } from "@/lib/deepLink";
 
 /**
  * Maps incoming `adabiyotx://` / universal deep links to app routes. QR-code
@@ -6,8 +6,9 @@ import { isAuthCallbackLink, resolveDeepLinkPath } from "@/lib/deepLink";
  * `adabiyotx://screenplay/..`.
  *
  * Anything we don't explicitly recognise falls back to home so an unknown link
- * never crashes the router — EXCEPT an OAuth callback, which is handed back
- * untouched so the access/refresh tokens in it survive.
+ * never crashes the router — EXCEPT an OAuth callback, which is routed to the
+ * callback screen with its tokens intact (query AND `#fragment` alike), so the
+ * user lands back INSIDE the app after signing in with Google/Apple.
  */
 export function redirectSystemPath({
   path,
@@ -16,7 +17,7 @@ export function redirectSystemPath({
   initial: boolean;
 }) {
   try {
-    if (isAuthCallbackLink(path)) return path;
+    if (isAuthCallbackLink(path)) return authCallbackRoutePath(path);
     return resolveDeepLinkPath(path) ?? "/";
   } catch {
     return "/";

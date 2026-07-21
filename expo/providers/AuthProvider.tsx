@@ -5,9 +5,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState } from "react-native";
 import { supabase } from "@/lib/supabase";
 import {
+  createSessionFromParams,
+  createSessionFromUrl,
   loadProfileAfterLogin,
   signInWithApple as runAppleSignIn,
   signInWithGoogle as runGoogleSignIn,
+  type AuthCallbackParams,
 } from "@/lib/auth";
 import { setCurrentUserId } from "@/lib/userStorage";
 import type { ProfileRow } from "@/types/database";
@@ -130,6 +133,37 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     }
   }, [clearGuest, syncProfile]);
 
+  /**
+   * Finish a sign-in that came back as a redirect rather than through the
+   * in-app browser promise — the `adabiyotx://auth/callback` deep link on
+   * native, or `/auth/callback` on the web. Accepts either the raw URL or the
+   * already-parsed params.
+   */
+  const completeOAuthCallback = useCallback(
+    async (input: string | AuthCallbackParams): Promise<boolean> => {
+      setLoading(true);
+      try {
+        let next =
+          typeof input === "string"
+            ? await createSessionFromUrl(input)
+            : await createSessionFromParams(input);
+
+        // On web `detectSessionInUrl` may have consumed the tokens before this
+        // screen ran — the session then already exists, so it isn't an error.
+        if (!next) next = (await supabase.auth.getSession()).data.session ?? null;
+        if (!next) return false;
+
+        await clearGuest();
+        await syncProfile(next);
+        setSession(next);
+        return true;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [clearGuest, syncProfile]
+  );
+
   const continueAsGuest = useCallback(async () => {
     setIsGuest(true);
     await AsyncStorage.setItem(GUEST_KEY, "1").catch(() => {});
@@ -171,6 +205,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       signingIn,
       signInWithGoogle,
       signInWithApple,
+      completeOAuthCallback,
       continueAsGuest,
       signOut,
       refreshProfileRow,
@@ -183,6 +218,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       signingIn,
       signInWithGoogle,
       signInWithApple,
+      completeOAuthCallback,
       continueAsGuest,
       signOut,
       refreshProfileRow,
