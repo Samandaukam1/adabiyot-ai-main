@@ -31,6 +31,12 @@ export interface WebBookHeroProps {
   audioLabel?: string | null;
   onAudio?: () => void;
   priceLabel?: string | null;
+  /**
+   * "Sotib olish" call to action for paid content, rendered right under the
+   * read / audio buttons. Kept as a slot so the screen owns the purchase rules
+   * and the phone layout can render the very same node.
+   */
+  purchaseCta?: React.ReactNode;
   aiHint?: string;
   onAiPress?: () => void;
   onBack?: () => void;
@@ -62,6 +68,7 @@ export default function WebBookHero({
   audioLabel,
   onAudio,
   priceLabel,
+  purchaseCta,
   aiHint = "Jaxongir AI'dan kitob haqida so'rang",
   onAiPress,
   onBack,
@@ -211,6 +218,10 @@ export default function WebBookHero({
               <Text style={{ color: c.textMuted, fontSize: 14, fontWeight: "700" }}>{priceLabel}</Text>
             ) : null}
           </View>
+
+          {/* Purchase CTA — a paid book must never lose its "Sotib olish" button
+              on the desktop layout. */}
+          {purchaseCta ? <View style={{ marginTop: 16, maxWidth: 420 }}>{purchaseCta}</View> : null}
 
           {onAiPress ? (
             <Pressable onPress={onAiPress} style={[{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 22 }, cursorPointer]}>

@@ -36,6 +36,7 @@ import RatingReviewBlock from "@/components/RatingReviewBlock";
 import BookCover from "@/components/BookCover";
 import ContentHeaderActions from "@/components/ContentHeaderActions";
 import JaxongirAskBar from "@/components/JaxongirAskBar";
+import BookPurchaseCta from "@/components/payments/BookPurchaseCta";
 import BuyConfirmSheet from "@/components/payments/BuyConfirmSheet";
 import CardPaymentSheet from "@/components/payments/CardPaymentSheet";
 import PromoPriceBlock from "@/components/payments/PromoPriceBlock";
@@ -96,7 +97,7 @@ export default function BookDetail() {
   );
   const { isAuthenticated } = useAuth();
   const { promptLogin } = useAuthGate();
-  const access = useContentAccess("book", mockBook?.id);
+  const access = useContentAccess("book", mockBook?.id, { isFree: mockBook?.free });
   const purchaseFlow = usePurchaseFlow();
   const paymentProductQuery = usePaymentProduct("book", mockBook?.id);
   const paymentProduct = paymentProductQuery.data ?? null;
@@ -215,6 +216,12 @@ export default function BookDetail() {
   // One combined price covers the e-book AND its audio narration — audio is
   // never sold (or priced) separately.
   const bookPrice = book.free ? 0 : paymentProduct?.amount_uzs ?? book.price;
+  // Entitlements still in flight — we must not claim the book is unpurchased yet.
+  const checkingAccess = access.isLoading;
+  // Only "loading" until the row lands once — a background refetch must not
+  // disable a CTA whose price is already known.
+  const productLoading =
+    !paymentProduct && (paymentProductQuery.isLoading || paymentProductQuery.isFetching);
 
   const statItems = [
     {
@@ -255,8 +262,9 @@ export default function BookDetail() {
       promptLogin();
       return;
     }
-    if (paymentProductQuery.isLoading || paymentProductQuery.isFetching) return;
+    if (checkingAccess) return;
     if (!paymentProduct) {
+      if (paymentProductQuery.isLoading || paymentProductQuery.isFetching) return;
       showMissingPaymentProductAlert();
       return;
     }
@@ -286,6 +294,19 @@ export default function BookDetail() {
     router.push(`/book-reader/${book.id}`);
   };
 
+  // Same purchase rules as the Supabase book screen below — the CTA is hidden
+  // only for a free or already-owned book, never because a query is pending.
+  const purchaseCtaProps = {
+    contentId: book.id,
+    isFree: book.free,
+    purchased,
+    checkingAccess,
+    productLoading,
+    hasProduct: !!paymentProduct,
+    price: bookPrice,
+    onPress: openBuy,
+  };
+
   return (
     <Screen>
       <ScrollView
@@ -313,7 +334,8 @@ export default function BookDetail() {
                   : openBuy
                 : undefined
             }
-            priceLabel={!purchased && !book.free ? formatPrice(bookPrice) : null}
+            priceLabel={null}
+            purchaseCta={<BookPurchaseCta {...purchaseCtaProps} />}
             onAiPress={() => router.push(`/book-ai/${book.id}`)}
             onBack={() => router.back()}
             headerActions={
@@ -402,7 +424,7 @@ export default function BookDetail() {
           </View>
         ) : null}
 
-        {!purchased ? (
+        {!purchased && !book.free && !checkingAccess ? (
           <PressableScale onPress={openBuy}>
             <CombinedPriceCard
               price={bookPrice}
@@ -412,6 +434,8 @@ export default function BookDetail() {
             />
           </PressableScale>
         ) : null}
+
+        <BookPurchaseCta {...purchaseCtaProps} style={styles.purchaseCtaWrap} />
 
         <View
           style={styles.actionsRow}
@@ -1157,14 +1181,18 @@ function SupabaseBookDetail({
   // Entitlements still in flight — we must not claim the book is unpurchased yet.
   const checkingAccess = access.isLoading;
   const bookPrice = book.isFree ? 0 : paymentProduct?.amount_uzs ?? book.price;
+  // Only "loading" until the row lands once — a background refetch must not
+  // disable a CTA whose price is already known.
+  const productLoading =
+    !paymentProduct && (paymentProductQuery.isLoading || paymentProductQuery.isFetching);
   const openBuy = useCallback(() => {
     if (!isAuthenticated) {
       promptLogin();
       return;
     }
     if (checkingAccess) return;
-    if (paymentProductQuery.isLoading || paymentProductQuery.isFetching) return;
     if (!paymentProduct) {
+      if (paymentProductQuery.isLoading || paymentProductQuery.isFetching) return;
       showMissingPaymentProductAlert();
       return;
     }
@@ -1208,6 +1236,20 @@ function SupabaseBookDetail({
     else openBuy();
   }, [canPreviewInReader, purchased, openReader, openBuy]);
 
+  // One set of purchase rules, rendered by both the desktop hero and the phone
+  // layout, so a paid book always offers a way to buy it — preview or not,
+  // audio or not.
+  const purchaseCtaProps = {
+    contentId: book.id,
+    isFree: book.isFree,
+    purchased,
+    checkingAccess,
+    productLoading,
+    hasProduct: !!paymentProduct,
+    price: bookPrice,
+    onPress: openBuy,
+  };
+
   return (
     <Screen>
       <ScrollView
@@ -1231,6 +1273,7 @@ function SupabaseBookDetail({
             audioLabel={hasAudio ? "Audio talqin" : null}
             onAudio={hasAudio ? (purchased ? () => router.push(`/audio/${book.id}`) : openBuy) : undefined}
             priceLabel={null}
+            purchaseCta={<BookPurchaseCta {...purchaseCtaProps} />}
             onAiPress={() => router.push(`/book-ai/${book.id}`)}
             onBack={() => router.back()}
             headerActions={
@@ -1380,18 +1423,15 @@ function SupabaseBookDetail({
           </View>
         ) : null}
 
-        {/* The buy card appears only once access is settled — a user who already
-            owns the book must never be asked to pay for it again. */}
-        {!book.isFree && checkingAccess ? (
-          <View style={[supaStyles.noContentBox, { marginTop: 14 }]}>
-            <Text style={supaStyles.noContentText}>Xarid holati tekshirilmoqda…</Text>
-          </View>
-        ) : null}
+        {/* The price card appears only once access is settled — a user who already
+            owns the book must never be asked to pay for it again. The CTA below
+            it stays up while the checks run, in a disabled state. */}
         {!book.isFree && !purchased && !checkingAccess && (
           <PressableScale onPress={openBuy} style={{ marginTop: 14 }}>
             <CombinedPriceCard price={bookPrice} audioAvailable={hasAudio} styles={styles} c={c} />
           </PressableScale>
         )}
+        <BookPurchaseCta {...purchaseCtaProps} style={styles.purchaseCtaWrap} />
           </>
         )}
 
@@ -1667,6 +1707,7 @@ function createStyles(c: AppTheme, isDark: boolean) {
       marginTop: 14,
       gap: 10,
     },
+    purchaseCtaWrap: { marginHorizontal: 20, marginTop: 14 },
     purchaseRow: {
       flexDirection: "row",
       gap: 10,

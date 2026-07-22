@@ -8,7 +8,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useRef, useState } from "react";
 import * as WebBrowser from "expo-web-browser";
-import { Alert } from "react-native";
 
 import { supabase } from "@/lib/supabase";
 import type { BookAccessReason } from "@/lib/bookAccess";
@@ -23,6 +22,7 @@ import {
   verifyCard,
 } from "@/lib/paymentsApi";
 import { useAuth } from "@/providers/AuthProvider";
+import { notify } from "@/utils/dialogs";
 import {
   PaymentApiError,
   isSubscriptionEntitlement,
@@ -103,7 +103,9 @@ function normalizePaymentProduct(row: unknown): PaymentProduct | null {
 }
 
 export function showMissingPaymentProductAlert() {
-  Alert.alert("To'lov mahsuloti topilmadi", PAYMENT_PRODUCT_MISSING_MESSAGE);
+  // `notify`, not `Alert` — RN-web stubs Alert out, so on the web panel the tap
+  // would look broken instead of explaining the missing price.
+  notify("To'lov mahsuloti topilmadi", PAYMENT_PRODUCT_MISSING_MESSAGE);
 }
 
 export function createOrderInputFromPaymentProduct(paymentProduct: PaymentProduct): CreateOrderInput {
