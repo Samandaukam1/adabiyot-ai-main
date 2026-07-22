@@ -9,13 +9,22 @@
       "distribution": "internal",
       "ios": {
         "resourceClass": "m-medium"
+      },
+      "env": {
+        "EXPO_PUBLIC_PAYMENTS_API_URL": "https://adabiyotx-admin.vercel.app"
       }
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_PAYMENTS_API_URL": "https://adabiyotx-admin.vercel.app"
+      }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_PAYMENTS_API_URL": "https://adabiyotx-admin.vercel.app"
+      }
     }
   },
   "submit": {

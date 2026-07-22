@@ -28,7 +28,9 @@ import {
   shouldShowSplashIntro,
   type SplashIntroConfig,
 } from "@/lib/splashIntro";
+import { checkPaymentsApiConfig, PAYMENTS_API_URL } from "@/lib/paymentsApi";
 import { getContextFromPath } from "@/utils/jaxongirContext";
+import { notify } from "@/utils/dialogs";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -247,6 +249,14 @@ export default function RootLayout() {
     };
     window.addEventListener("unhandledrejection", onRejection);
     return () => window.removeEventListener("unhandledrejection", onRejection);
+  }, []);
+
+  // `EXPO_PUBLIC_PAYMENTS_API_URL` is baked in at build time, so a binary built
+  // without it can only be diagnosed from the running app. Log the resolved URL
+  // on every launch, and say so out loud when it cannot work.
+  useEffect(() => {
+    const issue = checkPaymentsApiConfig();
+    if (issue) notify("To'lov sozlamasi noto'g'ri", `${issue}\n\nPAYMENTS_API_URL: ${PAYMENTS_API_URL}`);
   }, []);
 
   return (

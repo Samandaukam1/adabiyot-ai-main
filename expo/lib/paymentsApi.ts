@@ -39,11 +39,82 @@ import {
  */
 export const PAYMENTS_API_URL = (
   process.env.EXPO_PUBLIC_PAYMENTS_API_URL || "https://REPLACE-ME.example.com"
-).replace(/\/+$/, "");
+)
+  .replace(/^EXPO_PUBLIC_PAYMENTS_API_URL=/, "")
+  .replace(/\/+$/, "");
 
-if (__DEV__) {
-  // Safe: only the base URL — no tokens/keys.
-  if (__DEV__) console.log("[PAYMENTS_API_URL]", PAYMENTS_API_URL);
+/**
+ * Why the configured base URL cannot work, or null when it looks usable.
+ *
+ * `EXPO_PUBLIC_*` is inlined at BUILD time, so a TestFlight binary built without
+ * the variable keeps the placeholder and every request dies in `fetch` — which
+ * used to reach the user as "Internet aloqasini tekshiring". Naming the real
+ * cause here is what makes that distinguishable on a device.
+ */
+export const PAYMENTS_API_URL_ISSUE: string | null = (() => {
+  const raw = process.env.EXPO_PUBLIC_PAYMENTS_API_URL;
+  if (!raw) return "EXPO_PUBLIC_PAYMENTS_API_URL o'rnatilmagan (build ichida yo'q).";
+  if (PAYMENTS_API_URL.includes("REPLACE-ME")) return "EXPO_PUBLIC_PAYMENTS_API_URL hali placeholder.";
+  if (!/^https?:\/\/[^/\s]+$/i.test(PAYMENTS_API_URL)) {
+    return `EXPO_PUBLIC_PAYMENTS_API_URL noto'g'ri: "${PAYMENTS_API_URL}"`;
+  }
+  if (PAYMENTS_API_URL.startsWith("http://")) return "EXPO_PUBLIC_PAYMENTS_API_URL http:// — iOS ATS bloklaydi.";
+  return null;
+})();
+
+export const isPaymentsApiUrlValid = PAYMENTS_API_URL_ISSUE === null;
+
+/** Full URL of an endpoint — logged so a device build shows exactly where it dialled. */
+export function paymentsApiUrl(path: string): string {
+  return `${PAYMENTS_API_URL}${path}`;
+}
+
+/**
+ * Payment diagnostics are deliberately NOT behind `__DEV__`: the bugs we need to
+ * see (a wrong base URL, a 401, an HTML proxy error) only ever happen in real
+ * TestFlight / App Store builds, where `__DEV__` is false. Nothing logged here is
+ * sensitive — bodies are redacted below and the access token is never included.
+ */
+function logPayments(label: string, payload: unknown) {
+  console.log(label, payload);
+}
+
+const SENSITIVE_BODY_KEYS = new Set(["number", "expire", "code", "token", "card", "cvv"]);
+
+/** Card numbers, SMS codes and card tokens must never reach a log. */
+function redactBody(body: unknown): unknown {
+  if (body === undefined) return undefined;
+  if (!body || typeof body !== "object") return body;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(body as Record<string, unknown>)) {
+    out[key] = SENSITIVE_BODY_KEYS.has(key.toLowerCase()) ? "[redacted]" : value;
+  }
+  return out;
+}
+
+/** Response bodies can be a whole HTML error page — keep the head of it only. */
+function truncate(text: string, max = 500): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+/**
+ * Logs the payment configuration once at startup, and returns the problem (if
+ * any) so the caller can surface it. Run from the root layout.
+ */
+export function checkPaymentsApiConfig(): string | null {
+  logPayments("[PaymentAPI Config]", {
+    PAYMENTS_API_URL,
+    createOrderUrl: paymentsApiUrl("/api/payments/create-order"),
+    valid: isPaymentsApiUrlValid,
+    issue: PAYMENTS_API_URL_ISSUE,
+  });
+  if (PAYMENTS_API_URL_ISSUE) {
+    console.error("[PaymentAPI ConfigError]", {
+      PAYMENTS_API_URL,
+      issue: PAYMENTS_API_URL_ISSUE,
+    });
+  }
+  return PAYMENTS_API_URL_ISSUE;
 }
 
 /**
@@ -67,9 +138,8 @@ async function getSessionToken(): Promise<string | null> {
   }
 
   const token = session?.access_token ?? null;
-  if (__DEV__) {
-    if (__DEV__) console.log("[PAYMENT_AUTH]", { hasSession: !!session, hasAccessToken: !!token });
-  }
+  // Booleans only — the token value itself is never logged.
+  logPayments("[PaymentAPI Auth]", { hasSession: !!session, hasAccessToken: !!token });
   return token;
 }
 
@@ -104,16 +174,38 @@ interface RawJsonResult {
   status: number;
   ok: boolean;
   json: unknown;
+  /** Raw body, kept even when it isn't JSON (HTML error pages, proxy dumps). */
+  bodyText: string;
 }
 
 /** Low-level authenticated fetch that returns the raw HTTP status + parsed body
  *  WITHOUT throwing on non-2xx. Only network/timeout failures throw. Callers that
  *  need the status/body (e.g. create-order diagnostics) build on this. */
 async function rawJsonFetch(path: string, init: AuthedFetchInit, token: string | null): Promise<RawJsonResult> {
+  const url = paymentsApiUrl(path);
+  const method = init.method ?? "GET";
+
+  logPayments("[PaymentAPI Request]", {
+    url,
+    method,
+    hasToken: !!token,
+    body: redactBody(init.body),
+  });
+
+  // A placeholder / malformed base URL fails inside fetch exactly like a dead
+  // network would. Say what it really is instead of blaming the connection.
+  if (!isPaymentsApiUrlValid) {
+    console.error("[PaymentAPI ConfigError]", { url, method, PAYMENTS_API_URL, issue: PAYMENTS_API_URL_ISSUE });
+    throw new PaymentApiError(
+      `To'lov manzili noto'g'ri sozlangan. ${PAYMENTS_API_URL_ISSUE}`,
+      "config",
+    );
+  }
+
   let res: Response;
   try {
-    res = await fetch(`${PAYMENTS_API_URL}${path}`, {
-      method: init.method ?? "GET",
+    res = await fetch(url, {
+      method,
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
@@ -121,27 +213,73 @@ async function rawJsonFetch(path: string, init: AuthedFetchInit, token: string |
       },
       body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
     });
-  } catch {
+  } catch (error) {
+    // The ONLY place "Internet aloqasini tekshiring" is justified: the request
+    // never reached the backend. Log the real reason — on iOS this is where a
+    // TLS/ATS/DNS failure or a bad base URL actually shows up.
+    const err = error as Error;
+    console.error("[PaymentAPI NetworkError]", {
+      url,
+      method,
+      PAYMENTS_API_URL,
+      name: err?.name,
+      message: err?.message,
+      stack: err?.stack,
+    });
     throw new PaymentApiError("Internet aloqasini tekshiring.", "network");
   }
 
-  let json: unknown = null;
+  // Read as text first so a non-JSON body (Vercel HTML error, gateway page) is
+  // never thrown away — parsing it is a second, optional step.
+  let bodyText = "";
   try {
-    json = await res.json();
-  } catch {
-    json = null;
+    bodyText = await res.text();
+  } catch (error) {
+    console.error("[PaymentAPI BodyReadError]", { url, status: res.status, message: (error as Error)?.message });
   }
 
-  return { status: res.status, ok: res.ok, json };
+  let json: unknown = null;
+  if (bodyText) {
+    try {
+      json = JSON.parse(bodyText);
+    } catch {
+      json = null;
+    }
+  }
+
+  logPayments("[PaymentAPI Response]", {
+    url,
+    method,
+    status: res.status,
+    ok: res.ok,
+    ...(json !== null ? { json } : { bodyText: truncate(bodyText) }),
+  });
+
+  return { status: res.status, ok: res.ok, json, bodyText };
 }
 
+/**
+ * Turns a non-2xx response into an error the user can act on. An HTTP failure is
+ * never connectivity — it always reports the backend's own message, its status,
+ * or (when the body isn't JSON) the head of the raw body.
+ */
 function throwForFailedResponse(result: RawJsonResult): never {
-  const payload = (result.json ?? {}) as { error?: string; code?: string };
-  throw new PaymentApiError(
-    payload.error || "Xatolik yuz berdi. Qayta urinib ko'ring.",
-    payload.code,
-    result.status,
-  );
+  const payload = (result.json ?? {}) as { error?: string; message?: string; code?: string };
+  const bodySnippet = result.json === null && result.bodyText ? truncate(result.bodyText.trim(), 160) : "";
+  const message =
+    payload.error ||
+    payload.message ||
+    bodySnippet ||
+    `Server xatosi (HTTP ${result.status}). Qayta urinib ko'ring.`;
+
+  console.error("[PaymentAPI HttpError]", {
+    status: result.status,
+    code: payload.code,
+    message,
+    bodyText: truncate(result.bodyText),
+  });
+
+  throw new PaymentApiError(message, payload.code, result.status);
 }
 
 async function jsonFetch<T>(path: string, init: AuthedFetchInit, token: string | null): Promise<T> {
@@ -174,7 +312,8 @@ export async function createOrder(input: CreateOrderBody): Promise<CreateOrderRe
 
   // Diagnostic (safe: response body carries order/receipt ids only — never the
   // card number, token, SMS code, or access token, which are sent elsewhere).
-  if (__DEV__) console.log("[CREATE_ORDER_RESPONSE_DEBUG]", {
+  logPayments("[PaymentAPI CreateOrder]", {
+    url: paymentsApiUrl("/api/payments/create-order"),
     status: result.status,
     ok: result.ok,
     body: result.json,

@@ -116,8 +116,9 @@ export function createOrderInputFromPaymentProduct(paymentProduct: PaymentProduc
   };
 }
 
+/** Not `__DEV__`-gated: this is exactly what we need from a TestFlight device. */
 export function logCreateOrderDebug(paymentProduct: PaymentProduct | null | undefined) {
-  if (__DEV__) console.log("[CREATE_ORDER_DEBUG]", {
+  console.log("[CREATE_ORDER_DEBUG]", {
     productId: paymentProduct?.id,
     contentType: paymentProduct?.content_type,
     contentId: paymentProduct?.content_id,
@@ -461,6 +462,14 @@ export function usePurchaseFlow() {
     } catch (error) {
       // Reached only when create-order ITSELF failed (non-2xx / network). Show
       // the backend's real error message (kassa-inactive codes → kassa message).
+      const err = error as PaymentApiError;
+      console.error("[PaymentFlow Error]", {
+        step: "create-order",
+        code: err?.code,
+        status: err?.status,
+        name: err?.name,
+        message: err?.message,
+      });
       setErrorMessage(messageForError(error));
       setState("failed");
     } finally {
