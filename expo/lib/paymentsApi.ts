@@ -10,6 +10,8 @@
  * Every request is authenticated with the current Supabase access token
  * (`Authorization: Bearer …`), which the backend verifies via `requireUser`.
  */
+import { Platform } from "react-native";
+
 import { supabase } from "@/lib/supabase";
 import {
   extractCreateOrderIdentifiers,
@@ -74,9 +76,15 @@ export function paymentsApiUrl(path: string): string {
  * see (a wrong base URL, a 401, an HTML proxy error) only ever happen in real
  * TestFlight / App Store builds, where `__DEV__` is false. Nothing logged here is
  * sensitive — bodies are redacted below and the access token is never included.
+ *
+ * The per-request trace is native-only: adabiyotx.uz is a public site and its
+ * console should stay quiet. Failures (`console.error` below) still speak up
+ * everywhere, since those only fire when something is actually broken.
  */
+const TRACE_PAYMENTS = Platform.OS !== "web";
+
 function logPayments(label: string, payload: unknown) {
-  console.log(label, payload);
+  if (TRACE_PAYMENTS) console.log(label, payload);
 }
 
 const SENSITIVE_BODY_KEYS = new Set(["number", "expire", "code", "token", "card", "cvv"]);

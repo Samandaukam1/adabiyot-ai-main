@@ -8,6 +8,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useRef, useState } from "react";
 import * as WebBrowser from "expo-web-browser";
+import { Platform } from "react-native";
 
 import { supabase } from "@/lib/supabase";
 import type { BookAccessReason } from "@/lib/bookAccess";
@@ -116,8 +117,9 @@ export function createOrderInputFromPaymentProduct(paymentProduct: PaymentProduc
   };
 }
 
-/** Not `__DEV__`-gated: this is exactly what we need from a TestFlight device. */
+/** Native-only, but not `__DEV__`-gated: this is what we need from TestFlight. */
 export function logCreateOrderDebug(paymentProduct: PaymentProduct | null | undefined) {
+  if (Platform.OS === "web") return;
   console.log("[CREATE_ORDER_DEBUG]", {
     productId: paymentProduct?.id,
     contentType: paymentProduct?.content_type,
