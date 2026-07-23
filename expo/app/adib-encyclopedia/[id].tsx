@@ -9,135 +9,33 @@ import type { AppTheme } from "@/constants/colors";
 import { FONT, PressableScale } from "@/components/ui";
 import EncyclopediaApplyButton from "@/components/EncyclopediaApplyButton";
 import LiderlarCredit from "@/components/LiderlarCredit";
+import WebAdibProfile from "@/components/web/WebAdibProfile";
+import { articleSectionsFor, biographyBlocks, factsFor } from "@/lib/adibContent";
 import { useAdibEntry } from "@/hooks/useAdibEncyclopedia";
 import { useResponsive } from "@/hooks/useResponsive";
 import { useTheme } from "@/providers/ThemeProvider";
 import type { AdibEntry } from "@/types/community";
 import { getInitials } from "@/types/profile";
 
-interface FactDefinition {
-  label: string;
-  quickKeys: string[];
-  fallback: (adib: AdibEntry) => unknown;
-}
-
-const FACTS: FactDefinition[] = [
-  { label: "Ismi", quickKeys: ["Ismi", "full_name", "name"], fallback: (a) => a.fullName },
-  { label: "Taxallusi", quickKeys: ["Taxallusi", "pen_name", "penName"], fallback: (a) => a.penName },
-  { label: "AdabiyotX taxallusi", quickKeys: ["AdabiyotX taxallusi", "adabiyotx_username"], fallback: (a) => a.adabiyotxUsername ? `@${a.adabiyotxUsername.replace(/^@+/, "")}` : null },
-  { label: "Tug'ilgan sana", quickKeys: ["Tug'ilgan sana", "birth_date"], fallback: (a) => a.birthDate },
-  { label: "Tug'ilgan yili", quickKeys: ["Tug'ilgan yili", "birth_year"], fallback: (a) => a.birthYear },
-  { label: "Tug'ilgan joyi", quickKeys: ["Tug'ilgan joyi", "birth_place"], fallback: (a) => a.birthPlace },
-  { label: "Mutaxassisligi", quickKeys: ["Mutaxassisligi", "specialty"], fallback: (a) => a.specialty },
-  { label: "Kasbi", quickKeys: ["Kasbi", "profession"], fallback: (a) => a.profession },
-  { label: "Millati", quickKeys: ["Millati", "nationality"], fallback: (a) => a.nationality },
-  { label: "Partiyaviyligi", quickKeys: ["Partiyaviyligi", "party_affiliation"], fallback: (a) => a.partyAffiliation },
-  { label: "Tillar bilishi", quickKeys: ["Tillar bilishi", "languages"], fallback: (a) => a.languages },
-];
-
-function normalizeFactKey(value: string): string {
-  return value.trim().toLocaleLowerCase().replace(/[‘’ʻʼ`]/g, "'");
-}
-
-function displayValue(value: unknown): string | null {
-  if (Array.isArray(value)) {
-    const items = value.map((item) => String(item).trim()).filter(Boolean);
-    return items.length ? items.join(" | ") : null;
-  }
-  if (typeof value === "string") return value.trim() || null;
-  if (typeof value === "number") return String(value);
-  return null;
-}
-
-function factsFor(adib: AdibEntry): { label: string; value: string }[] {
-  const quickFacts = new Map(
-    Object.entries(adib.quickFacts).map(([key, value]) => [normalizeFactKey(key), value])
-  );
-
-  return FACTS.flatMap((definition) => {
-    const quickValue = definition.quickKeys
-      .map((key) => quickFacts.get(normalizeFactKey(key)))
-      .find((value) => displayValue(value) != null);
-    const value = displayValue(quickValue) ?? displayValue(definition.fallback(adib));
-    return value ? [{ label: definition.label, value }] : [];
-  });
-}
-
-function decodeHtml(text: string): string {
-  const entities: Record<string, string> = {
-    "&nbsp;": " ",
-    "&amp;": "&",
-    "&lt;": "<",
-    "&gt;": ">",
-    "&quot;": '"',
-    "&#39;": "'",
-  };
-  return text.replace(/&(nbsp|amp|lt|gt|quot|#39);/g, (match) => entities[match] ?? match);
-}
-
-function htmlToReadableText(html: string): string {
-  return decodeHtml(
-    html
-      .replace(/<h[1-6][^>]*>/gi, "\n## ")
-      .replace(/<\/h[1-6]>/gi, "\n\n")
-      .replace(/<li[^>]*>/gi, "\n• ")
-      .replace(/<\/(li|p|div|section|article)>/gi, "\n\n")
-      .replace(/<br\s*\/?\s*>/gi, "\n")
-      .replace(/<[^>]+>/g, "")
-  )
-    .replace(/\n[ \t]+/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
 function BiographyContent({ adib, styles }: { adib: AdibEntry; styles: ReturnType<typeof createStyles> }) {
-  const source = adib.biographyHtml
-    ? htmlToReadableText(adib.biographyHtml)
-    : adib.biographyMarkdown?.trim() || adib.shortDescription?.trim() || "";
-  if (!source) return null;
-
-  const blocks = source.split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
+  const blocks = biographyBlocks(adib);
+  if (!blocks.length) return null;
   return (
     <View style={styles.biographyCard}>
-      {blocks.map((block, index) => {
-        const heading = block.match(/^#{1,6}\s+(.+)$/s);
-        if (heading) return <Text key={index} style={styles.biographyHeading}>{heading[1]}</Text>;
-        const cleaned = block
-          .replace(/\*\*(.*?)\*\*/g, "$1")
-          .replace(/__(.*?)__/g, "$1")
-          .replace(/\[([^\]]+)\]\([^\)]+\)/g, "$1");
-        return <Text key={index} style={styles.biographyText}>{cleaned}</Text>;
-      })}
+      {blocks.map((block, index) =>
+        block.kind === "heading" ? (
+          <Text key={index} style={styles.biographyHeading}>{block.text}</Text>
+        ) : (
+          <Text key={index} style={styles.biographyText}>{block.text}</Text>
+        )
+      )}
     </View>
   );
 }
 
-const ARTICLE_SECTIONS: { key: string; title: string }[] = [
-  { key: "early_life", title: "Erta hayoti va oilasi" },
-  { key: "education", title: "Ta’limi" },
-  { key: "activity", title: "Faoliyati" },
-  { key: "achievements", title: "Yutuqlari" },
-  { key: "creative_works", title: "Ijodiy ishlari yoki loyihalari" },
-  { key: "values", title: "Qarashlari va qadriyatlari" },
-  { key: "future_plans", title: "Kelajakdagi rejalari" },
-  { key: "additional", title: "Qo‘shimcha ma’lumot" },
-];
-
-function sectionParagraphs(value: unknown): string[] {
-  const text = displayValue(value);
-  if (!text) return [];
-  return text.split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
-}
-
 /** Renders the long-form article body assembled from the `sections` jsonb. */
 function ArticleSections({ adib, styles }: { adib: AdibEntry; styles: ReturnType<typeof createStyles> }) {
-  const normalized = new Map(
-    Object.entries(adib.sections).map(([key, value]) => [key.trim().toLowerCase(), value])
-  );
-  const present = ARTICLE_SECTIONS.flatMap((item) => {
-    const paragraphs = sectionParagraphs(normalized.get(item.key));
-    return paragraphs.length ? [{ ...item, paragraphs }] : [];
-  });
+  const present = articleSectionsFor(adib);
   if (present.length === 0) return null;
 
   return (
@@ -169,7 +67,7 @@ export default function AdibEncyclopediaDetailScreen() {
     return (
       <View style={[styles.screen, styles.center]}>
         <ActivityIndicator color={c.primary} size="large" />
-        <Text style={styles.stateText}>Ma’lumotlar yuklanmoqda…</Text>
+        <Text style={styles.stateText}>Ma'lumotlar yuklanmoqda…</Text>
       </View>
     );
   }
@@ -189,6 +87,15 @@ export default function AdibEncyclopediaDetailScreen() {
     );
   }
 
+  // Web gets the premium editorial profile; the phone keeps its own layout.
+  if (isWebLayout) {
+    return (
+      <View style={styles.screen}>
+        <WebAdibProfile adib={adib} />
+      </View>
+    );
+  }
+
   const handle = adib.adabiyotxUsername
     ? `@${adib.adabiyotxUsername.replace(/^@+/, "")}`
     : null;
@@ -198,10 +105,7 @@ export default function AdibEncyclopediaDetailScreen() {
     <View style={styles.screen}>
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={[
-          { paddingBottom: insets.bottom + 50 },
-          isWebLayout && styles.webContent,
-        ]}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 50 }}
       >
         <View style={[styles.hero, { paddingTop: insets.top + 8 }]}>
           {adib.coverUrl ? (
@@ -228,7 +132,7 @@ export default function AdibEncyclopediaDetailScreen() {
             </LinearGradient>
           )}
           <Text style={styles.name}>{adib.fullName}</Text>
-          {adib.penName ? <Text style={styles.pen}>“{adib.penName}”</Text> : null}
+          {adib.penName ? <Text style={styles.pen}>"{adib.penName}"</Text> : null}
           {handle ? <Text style={styles.handle}>{handle}</Text> : null}
           {adib.roles.length ? <Text style={styles.roles}>{adib.roles.join(" | ")}</Text> : null}
           {adib.shortDescription ? <Text style={styles.shortDescription}>{adib.shortDescription}</Text> : null}
@@ -239,7 +143,7 @@ export default function AdibEncyclopediaDetailScreen() {
 
           {facts.length > 0 ? (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Qisqacha ma’lumotlar</Text>
+              <Text style={styles.sectionTitle}>Qisqacha ma'lumotlar</Text>
               <View style={styles.factsCard}>
                 {facts.map((fact, index) => (
                   <View key={fact.label} style={[styles.factRow, index === facts.length - 1 && styles.factRowLast]}>
@@ -272,7 +176,6 @@ function createStyles(c: AppTheme, isDark: boolean) {
   return StyleSheet.create({
     screen: { flex: 1, backgroundColor: c.bg },
     center: { alignItems: "center", justifyContent: "center", gap: 15, paddingHorizontal: 28 },
-    webContent: { width: "100%", maxWidth: 900, alignSelf: "center" },
     stateText: { color: c.textMuted, fontSize: 14, lineHeight: 21, textAlign: "center", fontWeight: "600" },
     retryButton: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 17, paddingVertical: 10, borderRadius: 999, backgroundColor: c.bgCard },
     retryText: { color: c.primary, fontSize: 13, fontWeight: "800" },
