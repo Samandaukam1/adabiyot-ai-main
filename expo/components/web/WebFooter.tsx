@@ -42,8 +42,8 @@ const COLUMNS: { title: string; links: FooterLink[] }[] = [
     links: [
       { label: "Biz haqimizda" },
       { label: "Foydalanish shartlari" },
-      { label: "Maxfiylik siyosati" },
-      { label: "Aloqa" },
+      { label: "Maxfiylik siyosati", href: "/privacy" },
+      { label: "Aloqa", url: "mailto:jaxongir_man@icloud.com" },
     ],
   },
 ];
