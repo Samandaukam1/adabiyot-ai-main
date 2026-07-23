@@ -81,11 +81,16 @@ function JaxongirAIOverlay() {
 
 function RootLayoutNav() {
   const { colors, isDark } = useTheme();
-  const { loading, isAuthenticated, isGuest } = useAuth();
+  const { loading, isAuthenticated, isGuest, continueAsGuest } = useAuth();
   const { modal: authGateModal } = useAuthGate();
   const segments = useSegments();
   const { isWebLayout } = useResponsive();
-  const [splashState, setSplashState] = useState<SplashGateState>("checking");
+  // The web site opens straight into content: no branding loader, no admin
+  // splash intro. Those are a native-launch experience only, so on web the
+  // splash gate starts already "done".
+  const [splashState, setSplashState] = useState<SplashGateState>(
+    isWebLayout ? "done" : "checking"
+  );
   const [splashConfig, setSplashConfig] = useState<SplashIntroConfig | null>(null);
 
   // Redirect between the auth gate and the app based on session / guest state.
@@ -102,14 +107,23 @@ function RootLayoutNav() {
     const canEnter =
       isAuthenticated || isGuest || onPublicEncyclopediaScreen || onPublicLegalScreen;
     if (!canEnter && !onAuthScreen) {
-      router.replace("/auth");
+      // On the web a visitor should land on the site immediately, in guest
+      // mode — never bounced to the login gate. Native still shows /auth.
+      if (isWebLayout) void continueAsGuest();
+      else router.replace("/auth");
     } else if (canEnter && onAuthScreen) {
       router.replace("/(tabs)");
     }
-  }, [loading, isAuthenticated, isGuest, segments]);
+  }, [loading, isAuthenticated, isGuest, segments, isWebLayout, continueAsGuest]);
 
   useEffect(() => {
     if (loading) return;
+    // Web never shows the admin splash intro — open the site at once.
+    if (isWebLayout) {
+      setSplashConfig(null);
+      setSplashState("done");
+      return;
+    }
 
     let active = true;
 
@@ -133,7 +147,7 @@ function RootLayoutNav() {
     return () => {
       active = false;
     };
-  }, [loading]);
+  }, [loading, isWebLayout]);
 
   // Hide the native splash only when we can either display the intro or continue.
   useEffect(() => {
@@ -221,12 +235,12 @@ function RootLayoutNav() {
       <JaxongirAIOverlay />
       {authGateModal}
       <AppUpdateChecker />
-      {loading || splashState === "checking" ? (
+      {!isWebLayout && (loading || splashState === "checking") ? (
         <View pointerEvents="auto" style={styles.loadingOverlay}>
           <BrandingLoadingScreen />
         </View>
       ) : null}
-      {splashState === "showing" && splashConfig ? (
+      {!isWebLayout && splashState === "showing" && splashConfig ? (
         <SplashIntro
           config={splashConfig}
           onShown={handleSplashShown}
