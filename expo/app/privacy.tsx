@@ -1,463 +1,317 @@
-import { LinearGradient } from "expo-linear-gradient";
-import { router } from "expo-router";
-import { ArrowLeft, Globe, Mail, ShieldCheck } from "lucide-react-native";
-import React, { useMemo } from "react";
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import React from "react";
 
-import { FONT } from "@/components/ui";
-import WebContainer from "@/components/web/WebContainer";
-import WebFooter from "@/components/web/WebFooter";
-import { cursorPointer, hoverTransition } from "@/components/web/webStyle";
-import { useHover } from "@/components/web/useHover";
-import type { AppTheme } from "@/constants/colors";
-import { useResponsive } from "@/hooks/useResponsive";
-import { useTheme } from "@/providers/ThemeProvider";
-import { openExternalUrl } from "@/utils/safeLinks";
+import LegalDocument, { LEGAL_BRAND, type LegalContent } from "@/components/legal/LegalDocument";
 
-const BRAND = "AdabiyotX";
-const COMPANY = "Mukammal Media Group";
-const CONTACT_EMAIL = "jaxongir_man@icloud.com";
-const WEBSITE_URL = "https://adabiyotx.uz";
-const WEBSITE_LABEL = "adabiyotx.uz";
-const LAST_UPDATED = "23-iyul, 2026";
+const B = LEGAL_BRAND;
+
+const UZ: LegalContent = {
+  title: "Maxfiylik siyosati",
+  subtitle: `${B} sizning maxfiyligingizni qadrlaydi. Ushbu hujjat qanday ma'lumotlar to'planishi va ular qanday himoyalanishini tushuntiradi.`,
+  updatedLabel: "Oxirgi yangilanish",
+  updatedValue: "23-iyul, 2026",
+  contactTitle: "12. Bog'lanish",
+  contactIntro: "Maxfiylik siyosati yoki ma'lumotlaringiz bo'yicha savollaringiz bo'lsa, biz bilan bog'laning:",
+  emailLabel: "Email",
+  websiteLabel: "Veb-sayt",
+  crossLinkLabel: "Foydalanish shartlari",
+  rightsReserved: "Barcha huquqlar himoyalangan.",
+  sections: [
+    {
+      title: "1. Kirish",
+      blocks: [
+        {
+          kind: "text",
+          text: `${B} — Mukammal Media Group tomonidan ishlab chiqilgan o'zbek adabiyoti platformasi. Ushbu Maxfiylik siyosati ${B} ilovasi va veb-saytidan foydalanganingizda qanday ma'lumotlar to'planishi, ular nima maqsadda ishlatilishi va qanday himoyalanishini tushuntiradi.`,
+        },
+        {
+          kind: "text",
+          text: "Ilova va veb-saytdan foydalanish orqali siz ushbu siyosatda bayon etilgan shartlarga rozilik bildirasiz. Iltimos, uni diqqat bilan o'qib chiqing.",
+        },
+      ],
+    },
+    {
+      title: "2. Qanday ma'lumotlar yig'iladi",
+      blocks: [
+        { kind: "text", text: "Xizmatni taqdim etish uchun biz quyidagi ma'lumotlarni yig'ishimiz mumkin:" },
+        {
+          kind: "list",
+          items: [
+            "Email manzil — akkauntni yaratish va tizimga kirish uchun;",
+            "Foydalanuvchi identifikatori (user ID) — akkauntingizni aniqlash uchun;",
+            "Profil ma'lumotlari — ism, taxallus (username), avatar va bio kabi siz kiritgan ma'lumotlar;",
+            "Foydalanuvchi yaratgan kontent — postlar, sharhlar, ijodiy materiallar va yuklagan fayllaringiz;",
+            "Xarid tarixi — sotib olingan kitob, audio, maqola va boshqa kontentga oid buyurtmalar;",
+            "Ilovadan foydalanish statistikasi — qaysi bo'limlar va funksiyalardan foydalanganingiz;",
+            "Crash va diagnostika ma'lumotlari — ilovaning barqaror ishlashini ta'minlash uchun texnik xatoliklar hisoboti.",
+          ],
+        },
+      ],
+    },
+    {
+      title: "3. Ma'lumotlardan foydalanish",
+      blocks: [
+        { kind: "text", text: "To'plangan ma'lumotlar faqat xizmatni taqdim etish va yaxshilash uchun ishlatiladi:" },
+        {
+          kind: "list",
+          items: [
+            "Akkaunt yaratish va tizimga kirishni ta'minlash;",
+            "Kitob, audio, maqola, reels va tokcha xizmatlaridan foydalanish imkonini berish;",
+            "Xaridlar va kontentga kirish huquqini (entitlements) boshqarish;",
+            "Platforma va akkauntlar xavfsizligini ta'minlash, suiiste'molning oldini olish;",
+            "Xizmat sifatini tahlil qilish va yaxshilash.",
+          ],
+        },
+      ],
+    },
+    {
+      title: "4. To'lovlar",
+      blocks: [
+        {
+          kind: "text",
+          text: "To'lovlar ishonchli to'lov provayderi va bizning backend tizimimiz orqali xavfsiz amalga oshiriladi.",
+        },
+        {
+          kind: "list",
+          items: [
+            `Karta ma'lumotlari (karta raqami, amal qilish muddati) ${B} ilovasida saqlanmaydi;`,
+            "Karta ma'lumotlari faqat to'lovni amalga oshirish uchun to'lov provayderiga xavfsiz uzatiladi;",
+            "Biz sizning to'liq karta raqamingizni ko'rmaymiz va saqlamaymiz — faqat buyurtma va xarid holati saqlanadi.",
+          ],
+        },
+      ],
+    },
+    {
+      title: "5. Tizimga kirish (Login)",
+      blocks: [
+        {
+          kind: "text",
+          text: "Akkauntga kirish uchun email bilan bir qatorda Google Sign In va Apple Sign In xizmatlaridan foydalanishingiz mumkin. Bunday holatda tegishli provayder sizning email manzilingiz kabi asosiy ma'lumotlarni bizga taqdim etadi; parolingiz biz bilan bo'lishilmaydi.",
+        },
+      ],
+    },
+    {
+      title: "6. Foydalanuvchi kontenti",
+      blocks: [
+        {
+          kind: "text",
+          text: "Siz yaratgan postlar, profil ma'lumotlari va ijodiy materiallar platformada boshqa foydalanuvchilarga ko'rinishi mumkin. Ommaviy joylashtirilgan kontentni qanday va qachon ulashishni siz nazorat qilasiz, va uni istalgan vaqtda o'zgartirishingiz yoki o'chirishingiz mumkin.",
+        },
+      ],
+    },
+    {
+      title: "7. Ma'lumotlarni ulashish",
+      blocks: [
+        {
+          kind: "list",
+          items: [
+            "Biz sizning shaxsiy ma'lumotlaringizni sotmaymiz;",
+            "Ma'lumotlar reklama yoki kuzatuv (tracking) uchun ishlatilmaydi va uchinchi tomonlarga sotilmaydi;",
+            "Ma'lumotlar faqat ilovaning ishlashi uchun zarur bo'lgan xizmat provayderlari (serverlar, to'lov va autentifikatsiya xizmatlari) bilan, faqat shu maqsadda ulashiladi;",
+            "Qonun talab qilgan hollarda tegishli davlat organlariga ma'lumot berilishi mumkin.",
+          ],
+        },
+      ],
+    },
+    {
+      title: "8. Ma'lumotlar xavfsizligi",
+      blocks: [
+        {
+          kind: "text",
+          text: "Biz ma'lumotlaringizni himoya qilish uchun texnik va tashkiliy choralarni qo'llaymiz: ma'lumotlar shifrlangan ulanish (TLS) orqali uzatiladi, kirish huquqlari cheklangan va tizimlarimiz muntazam nazorat qilinadi. Shunga qaramay, internetdagi hech bir uzatish yoki saqlash usuli 100% xavfsiz emasligini eslatib o'tamiz.",
+        },
+      ],
+    },
+    {
+      title: "9. Bolalar maxfiyligi",
+      blocks: [
+        {
+          kind: "text",
+          text: `${B} umumiy auditoriya (general audience) uchun mo'ljallangan. Biz bolalardan ataylab shaxsiy ma'lumot yig'maymiz. Agar bola tomonidan ma'lumot taqdim etilganini aniqlasak, uni imkon qadar tezroq o'chiramiz.`,
+        },
+      ],
+    },
+    {
+      title: "10. Foydalanuvchi huquqlari",
+      blocks: [
+        { kind: "text", text: "Sizning ma'lumotlaringiz ustidan quyidagi huquqlaringiz mavjud:" },
+        {
+          kind: "list",
+          items: [
+            "Akkauntingizni va unga bog'liq ma'lumotlarni o'chirish;",
+            "Profil ma'lumotlaringizni ko'rish va yangilash;",
+            "Ma'lumotlaringiz bo'yicha savol yoki so'rov bilan biz bilan bog'lanish.",
+          ],
+        },
+        { kind: "text", text: "Ushbu huquqlardan foydalanish uchun quyidagi manzil orqali biz bilan bog'laning." },
+      ],
+    },
+    {
+      title: "11. O'zgartirishlar",
+      blocks: [
+        {
+          kind: "text",
+          text: "Ushbu Maxfiylik siyosati vaqti-vaqti bilan yangilanishi mumkin. Muhim o'zgarishlar bo'lsa, ilova yoki veb-sayt orqali xabar beramiz. Yuqoridagi \"Oxirgi yangilanish\" sanasi eng so'nggi tahrirni bildiradi.",
+        },
+      ],
+    },
+  ],
+};
+
+const EN: LegalContent = {
+  title: "Privacy Policy",
+  subtitle: `${B} respects your privacy. This document explains what information we collect and how it is protected.`,
+  updatedLabel: "Last updated",
+  updatedValue: "23 July 2026",
+  contactTitle: "12. Contact",
+  contactIntro: "If you have any questions about this Privacy Policy or your data, please contact us:",
+  emailLabel: "Email",
+  websiteLabel: "Website",
+  crossLinkLabel: "Terms of Service",
+  rightsReserved: "All rights reserved.",
+  sections: [
+    {
+      title: "1. Introduction",
+      blocks: [
+        {
+          kind: "text",
+          text: `${B} is an Uzbek literature platform developed by Mukammal Media Group. This Privacy Policy explains what information is collected when you use the ${B} app and website, how it is used, and how it is protected.`,
+        },
+        {
+          kind: "text",
+          text: "By using the app and website, you agree to the terms set out in this policy. Please read it carefully.",
+        },
+      ],
+    },
+    {
+      title: "2. Information we collect",
+      blocks: [
+        { kind: "text", text: "To provide the service, we may collect the following information:" },
+        {
+          kind: "list",
+          items: [
+            "Email address — to create your account and sign you in;",
+            "User ID — to identify your account;",
+            "Profile information — such as your name, username, avatar and bio;",
+            "User-generated content — posts, comments, creative works and files you upload;",
+            "Purchase history — orders for books, audio, articles and other purchased content;",
+            "Usage data — which sections and features of the app you use;",
+            "Diagnostics and crash data — technical error reports that help keep the app stable.",
+          ],
+        },
+      ],
+    },
+    {
+      title: "3. How we use information",
+      blocks: [
+        { kind: "text", text: "Collected information is used only to provide and improve the service:" },
+        {
+          kind: "list",
+          items: [
+            "Creating your account and providing sign-in;",
+            "Enabling reading and listening features — books, audio, articles, reels and Tokcha;",
+            "Managing purchases and content access (entitlements);",
+            "Keeping the platform and accounts secure and preventing abuse;",
+            "Analysing and improving the quality of the service.",
+          ],
+        },
+      ],
+    },
+    {
+      title: "4. Payments",
+      blocks: [
+        { kind: "text", text: "Payments are processed securely through trusted payment providers and our backend systems." },
+        {
+          kind: "list",
+          items: [
+            `Card details (card number, expiry date) are not stored in the ${B} app;`,
+            "Card details are transmitted securely to the payment provider solely to complete the payment;",
+            "We never see or store your full card number — only the order and purchase status are kept.",
+          ],
+        },
+      ],
+    },
+    {
+      title: "5. Sign-in",
+      blocks: [
+        {
+          kind: "text",
+          text: "In addition to email, you may sign in using Google Sign-In and Apple Sign-In. In that case, the provider supplies basic information such as your email address; your password is never shared with us.",
+        },
+      ],
+    },
+    {
+      title: "6. User-generated content",
+      blocks: [
+        {
+          kind: "text",
+          text: "Posts, profile information and creative works you create may be visible to other users on the platform. You control how and when your publicly posted content is shared, and you can edit or delete it at any time.",
+        },
+      ],
+    },
+    {
+      title: "7. Data sharing",
+      blocks: [
+        {
+          kind: "list",
+          items: [
+            "We do not sell your personal data;",
+            "We do not track users across apps or websites, and we do not use your data for advertising tracking;",
+            "Data is shared only with service providers necessary for the app to work (servers, payment and authentication services), and only for that purpose;",
+            "We may disclose information to authorities where required by law.",
+          ],
+        },
+      ],
+    },
+    {
+      title: "8. Data security",
+      blocks: [
+        {
+          kind: "text",
+          text: "We apply technical and organisational measures to protect your data: information is transmitted over encrypted connections (TLS), access is restricted, and our systems are regularly monitored. However, no method of transmission or storage over the internet is 100% secure.",
+        },
+      ],
+    },
+    {
+      title: "9. Children's privacy",
+      blocks: [
+        {
+          kind: "text",
+          text: `${B} is intended for a general audience. We do not knowingly collect personal information from children. If we learn that a child has provided us with information, we will delete it as soon as possible.`,
+        },
+      ],
+    },
+    {
+      title: "10. Your rights",
+      blocks: [
+        { kind: "text", text: "You have the following rights over your data:" },
+        {
+          kind: "list",
+          items: [
+            "Delete your account and the data associated with it;",
+            "View and update your profile information;",
+            "Contact us with any question or request about your data.",
+          ],
+        },
+        { kind: "text", text: "To exercise these rights, please contact us at the address below." },
+      ],
+    },
+    {
+      title: "11. Changes",
+      blocks: [
+        {
+          kind: "text",
+          text: "We may update this Privacy Policy from time to time. If we make material changes, we will notify you through the app or website. The \"Last updated\" date above reflects the most recent revision.",
+        },
+      ],
+    },
+  ],
+};
 
 /**
- * A paragraph, or a bulleted list, inside a policy section. Kept as data so the
- * same content renders identically on the phone and the desktop web layout.
- */
-type Block =
-  | { kind: "text"; text: string }
-  | { kind: "list"; items: string[] };
-
-interface Section {
-  title: string;
-  blocks: Block[];
-}
-
-const SECTIONS: Section[] = [
-  {
-    title: "1. Kirish",
-    blocks: [
-      {
-        kind: "text",
-        text: `${BRAND} — ${COMPANY} tomonidan ishlab chiqilgan o'zbek adabiyoti platformasi. Ushbu Maxfiylik siyosati ${BRAND} ilovasi va veb-saytidan foydalanganingizda qanday ma'lumotlar to'planishi, ular nima maqsadda ishlatilishi va qanday himoyalanishini tushuntiradi.`,
-      },
-      {
-        kind: "text",
-        text: "Ilova va veb-saytdan foydalanish orqali siz ushbu siyosatda bayon etilgan shartlarga rozilik bildirasiz. Iltimos, uni diqqat bilan o'qib chiqing.",
-      },
-    ],
-  },
-  {
-    title: "2. Qanday ma'lumotlar yig'iladi",
-    blocks: [
-      {
-        kind: "text",
-        text: "Xizmatni taqdim etish uchun biz quyidagi ma'lumotlarni yig'ishimiz mumkin:",
-      },
-      {
-        kind: "list",
-        items: [
-          "Email manzil — akkauntni yaratish va tizimga kirish uchun;",
-          "Foydalanuvchi identifikatori (user ID) — akkauntingizni aniqlash uchun;",
-          "Profil ma'lumotlari — ism, taxallus (username), avatar va bio kabi siz kiritgan ma'lumotlar;",
-          "Foydalanuvchi yaratgan kontent — postlar, sharhlar, ijodiy materiallar va yuklagan fayllaringiz;",
-          "Xarid tarixi — sotib olingan kitob, audio, maqola va boshqa kontentga oid buyurtmalar;",
-          "Ilovadan foydalanish statistikasi — qaysi bo'limlar va funksiyalardan foydalanganingiz;",
-          "Crash va diagnostika ma'lumotlari — ilovaning barqaror ishlashini ta'minlash uchun texnik xatoliklar hisoboti.",
-        ],
-      },
-    ],
-  },
-  {
-    title: "3. Ma'lumotlar nima uchun ishlatiladi",
-    blocks: [
-      {
-        kind: "text",
-        text: "To'plangan ma'lumotlar faqat xizmatni taqdim etish va yaxshilash uchun ishlatiladi:",
-      },
-      {
-        kind: "list",
-        items: [
-          "Akkaunt yaratish va tizimga kirishni ta'minlash;",
-          "Kitob, audio, maqola, reels va tokcha xizmatlaridan foydalanish imkonini berish;",
-          "Xaridlar va kontentga kirish huquqini (entitlements) boshqarish;",
-          "Platforma va akkauntlar xavfsizligini ta'minlash, suiiste'molning oldini olish;",
-          "Xizmat sifatini tahlil qilish va yaxshilash.",
-        ],
-      },
-    ],
-  },
-  {
-    title: "4. To'lovlar",
-    blocks: [
-      {
-        kind: "text",
-        text: "To'lovlar ishonchli to'lov provayderi va bizning backend tizimimiz orqali xavfsiz amalga oshiriladi.",
-      },
-      {
-        kind: "list",
-        items: [
-          `Karta ma'lumotlari (karta raqami, amal qilish muddati) ${BRAND} ilovasida saqlanmaydi;`,
-          "Karta ma'lumotlari faqat to'lovni amalga oshirish uchun to'lov provayderiga xavfsiz uzatiladi;",
-          "Biz sizning to'liq karta raqamingizni ko'rmaymiz va saqlamaymiz — faqat buyurtma va xarid holati saqlanadi.",
-        ],
-      },
-    ],
-  },
-  {
-    title: "5. Tizimga kirish (Login)",
-    blocks: [
-      {
-        kind: "text",
-        text: "Akkauntga kirish uchun email bilan bir qatorda Google Sign In va Apple Sign In xizmatlaridan foydalanishingiz mumkin. Bunday holatda tegishli provayder sizning email manzilingiz kabi asosiy ma'lumotlarni bizga taqdim etadi; parolingiz biz bilan bo'lishilmaydi.",
-      },
-    ],
-  },
-  {
-    title: "6. Foydalanuvchi kontenti",
-    blocks: [
-      {
-        kind: "text",
-        text: "Siz yaratgan postlar, profil ma'lumotlari va ijodiy materiallar platformada boshqa foydalanuvchilarga ko'rinishi mumkin. Ommaviy joylashtirilgan kontentni qanday va qachon ulashishni siz nazorat qilasiz, va uni istalgan vaqtda o'zgartirishingiz yoki o'chirishingiz mumkin.",
-      },
-    ],
-  },
-  {
-    title: "7. Ma'lumotlarni ulashish",
-    blocks: [
-      {
-        kind: "list",
-        items: [
-          "Biz sizning shaxsiy ma'lumotlaringizni sotmaymiz;",
-          "Ma'lumotlar reklama yoki kuzatuv (tracking) maqsadida uchinchi tomonlarga sotilmaydi;",
-          "Ma'lumotlar faqat ilovaning ishlashi uchun zarur bo'lgan xizmat provayderlari (masalan, serverlar, to'lov va autentifikatsiya xizmatlari) bilan, faqat shu maqsadda ulashiladi;",
-          "Qonun talab qilgan hollarda tegishli davlat organlariga ma'lumot berilishi mumkin.",
-        ],
-      },
-    ],
-  },
-  {
-    title: "8. Kuzatuv (Tracking)",
-    blocks: [
-      {
-        kind: "text",
-        text: `${BRAND} sizni boshqa kompaniyalarning ilova va veb-saytlari bo'ylab reklama maqsadida kuzatmaydi. Biz sizning ma'lumotlaringizni uchinchi tomon reklama tarmoqlariga sotmaymiz.`,
-      },
-    ],
-  },
-  {
-    title: "9. Ma'lumotlar xavfsizligi",
-    blocks: [
-      {
-        kind: "text",
-        text: "Biz ma'lumotlaringizni himoya qilish uchun texnik va tashkiliy choralarni qo'llaymiz: ma'lumotlar shifrlangan ulanish (TLS) orqali uzatiladi, kirish huquqlari cheklangan va tizimlarimiz muntazam nazorat qilinadi. Shunga qaramay, internetdagi hech bir uzatish yoki saqlash usuli 100% xavfsiz emasligini eslatib o'tamiz.",
-      },
-    ],
-  },
-  {
-    title: "10. Bolalar maxfiyligi",
-    blocks: [
-      {
-        kind: "text",
-        text: `${BRAND} umumiy auditoriya (general audience) uchun mo'ljallangan. Biz bolalardan ataylab shaxsiy ma'lumot yig'maymiz. Agar bola tomonidan ma'lumot taqdim etilganini aniqlasak, uni imkon qadar tezroq o'chiramiz.`,
-      },
-    ],
-  },
-  {
-    title: "11. Foydalanuvchi huquqlari",
-    blocks: [
-      {
-        kind: "text",
-        text: "Sizning ma'lumotlaringiz ustidan quyidagi huquqlaringiz mavjud:",
-      },
-      {
-        kind: "list",
-        items: [
-          "Akkauntingizni va unga bog'liq ma'lumotlarni o'chirish;",
-          "Profil ma'lumotlaringizni ko'rish va yangilash;",
-          "Ma'lumotlaringiz bo'yicha savol yoki so'rov bilan biz bilan bog'lanish.",
-        ],
-      },
-      {
-        kind: "text",
-        text: "Ushbu huquqlardan foydalanish uchun quyidagi manzil orqali biz bilan bog'laning.",
-      },
-    ],
-  },
-];
-
-/**
- * /privacy — AdabiyotX Maxfiylik siyosati. Public, App Store / Google Play
- * uchun mos legal sahifa. Renders on both native and web (a store-registered
- * URL must be reachable in a browser); the desktop web layout gets the shared
- * WebHeader (global) + WebFooter, the phone gets a lightweight back bar.
+ * /privacy — AdabiyotX bilingual (UZ/EN) Maxfiylik siyosati / Privacy Policy.
+ * Public legal page for App Store Connect & Google Play, reachable at
+ * https://adabiyotx.uz/privacy.
  */
 export default function PrivacyPolicy() {
-  const { colors: c, isDark } = useTheme();
-  const { isWebLayout, isDesktopWeb } = useResponsive();
-  const insets = useSafeAreaInsets();
-  const styles = useMemo(() => createStyles(c, isDark), [c, isDark]);
-
-  const titleSize = isDesktopWeb ? 46 : isWebLayout ? 38 : 30;
-
-  return (
-    <ScrollView style={styles.root} contentContainerStyle={{ paddingBottom: isWebLayout ? 0 : 48 }}>
-      {/* Native-only back bar — on web the global WebHeader handles navigation. */}
-      {!isWebLayout ? (
-        <View style={[styles.backBar, { paddingTop: insets.top + 8 }]}>
-          <Pressable onPress={() => router.back()} style={styles.backBtn} hitSlop={8}>
-            <ArrowLeft color={c.text} size={22} />
-          </Pressable>
-          <Text style={styles.backTitle}>Maxfiylik siyosati</Text>
-        </View>
-      ) : null}
-
-      <View style={{ paddingTop: isWebLayout ? (isDesktopWeb ? 48 : 32) : 8 }}>
-        <WebContainer maxWidth={880}>
-          {/* Hero */}
-          <LinearGradient
-            colors={
-              isDark
-                ? ["rgba(82,183,136,0.14)", "rgba(29,53,87,0.10)"]
-                : ["#E8F5EE", "#F5F1EA"]
-            }
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.hero}
-          >
-            <View style={styles.brandRow}>
-              <View style={styles.brandBadge}>
-                <ShieldCheck color={c.primary} size={16} />
-                <Text style={styles.brandBadgeText}>{COMPANY.toUpperCase()}</Text>
-              </View>
-            </View>
-            <Text style={[styles.heroTitle, { fontSize: titleSize }]}>Maxfiylik siyosati</Text>
-            <Text style={styles.heroSubtitle}>
-              {BRAND} sizning maxfiyligingizni qadrlaydi. Ushbu hujjat qanday ma'lumotlar
-              to'planishi va ular qanday himoyalanishini tushuntiradi.
-            </Text>
-            <Text style={styles.updated}>Oxirgi yangilanish: {LAST_UPDATED}</Text>
-          </LinearGradient>
-
-          {/* Sections */}
-          <View style={styles.sections}>
-            {SECTIONS.map((section) => (
-              <PolicySection key={section.title} section={section} styles={styles} c={c} />
-            ))}
-
-            {/* 12. Contact */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>12. Bog'lanish</Text>
-              <Text style={styles.paragraph}>
-                Maxfiylik siyosati yoki ma'lumotlaringiz bo'yicha savollaringiz bo'lsa, biz
-                bilan bog'laning:
-              </Text>
-              <View style={styles.contactCard}>
-                <ContactRow
-                  icon={<Mail color={c.primary} size={18} />}
-                  label="Email"
-                  value={CONTACT_EMAIL}
-                  onPress={() => void openExternalUrl(`mailto:${CONTACT_EMAIL}`)}
-                  styles={styles}
-                />
-                <View style={styles.contactDivider} />
-                <ContactRow
-                  icon={<Globe color={c.primary} size={18} />}
-                  label="Veb-sayt"
-                  value={WEBSITE_LABEL}
-                  onPress={() => void openExternalUrl(WEBSITE_URL)}
-                  styles={styles}
-                />
-              </View>
-            </View>
-
-            <Text style={styles.footerNote}>
-              © {new Date().getFullYear()} {COMPANY}. {BRAND}. Barcha huquqlar himoyalangan.
-            </Text>
-          </View>
-        </WebContainer>
-      </View>
-
-      <WebFooter />
-    </ScrollView>
-  );
-}
-
-function PolicySection({
-  section,
-  styles,
-  c,
-}: {
-  section: Section;
-  styles: StylesType;
-  c: AppTheme;
-}) {
-  return (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>{section.title}</Text>
-      {section.blocks.map((block, i) =>
-        block.kind === "text" ? (
-          <Text key={i} style={styles.paragraph}>
-            {block.text}
-          </Text>
-        ) : (
-          <View key={i} style={styles.list}>
-            {block.items.map((item, j) => (
-              <View key={j} style={styles.listItem}>
-                <View style={styles.bullet} />
-                <Text style={styles.listText}>{item}</Text>
-              </View>
-            ))}
-          </View>
-        )
-      )}
-    </View>
-  );
-}
-
-function ContactRow({
-  icon,
-  label,
-  value,
-  onPress,
-  styles,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  onPress: () => void;
-  styles: StylesType;
-}) {
-  const { hovered, onHoverIn, onHoverOut } = useHover();
-  return (
-    <Pressable
-      onPress={onPress}
-      onHoverIn={onHoverIn}
-      onHoverOut={onHoverOut}
-      style={[styles.contactRow, cursorPointer]}
-    >
-      <View style={styles.contactIcon}>{icon}</View>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.contactLabel}>{label}</Text>
-        <Text style={[styles.contactValue, hovered ? styles.contactValueHover : null, hoverTransition]}>
-          {value}
-        </Text>
-      </View>
-    </Pressable>
-  );
-}
-
-type StylesType = ReturnType<typeof createStyles>;
-
-function createStyles(c: AppTheme, isDark: boolean) {
-  return StyleSheet.create({
-    root: { flex: 1, backgroundColor: c.bg },
-    backBar: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 12,
-      paddingHorizontal: 16,
-      paddingBottom: 10,
-      borderBottomWidth: 1,
-      borderBottomColor: c.border,
-    },
-    backBtn: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      alignItems: "center",
-      justifyContent: "center",
-      backgroundColor: c.surface,
-    },
-    backTitle: { color: c.text, fontSize: 18, fontWeight: "800", fontFamily: FONT.serif },
-
-    hero: {
-      borderRadius: 24,
-      padding: Platform.OS === "web" ? 40 : 24,
-      borderWidth: 1,
-      borderColor: isDark ? "rgba(82,183,136,0.22)" : "rgba(82,183,136,0.28)",
-    },
-    brandRow: { flexDirection: "row", marginBottom: 18 },
-    brandBadge: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 7,
-      alignSelf: "flex-start",
-      paddingHorizontal: 12,
-      paddingVertical: 6,
-      borderRadius: 999,
-      backgroundColor: isDark ? "rgba(82,183,136,0.16)" : "rgba(255,255,255,0.75)",
-      borderWidth: 1,
-      borderColor: isDark ? "rgba(82,183,136,0.30)" : "rgba(82,183,136,0.35)",
-    },
-    brandBadgeText: { color: c.primaryDim, fontSize: 11, fontWeight: "900", letterSpacing: 1.2 },
-    heroTitle: {
-      color: c.text,
-      fontWeight: "900",
-      fontFamily: FONT.serif,
-      letterSpacing: -1,
-      lineHeight: Platform.OS === "web" ? undefined : 38,
-    },
-    heroSubtitle: { color: c.textDim, fontSize: 16, lineHeight: 25, marginTop: 14, maxWidth: 620 },
-    updated: {
-      color: c.primaryDim,
-      fontSize: 13,
-      fontWeight: "700",
-      marginTop: 18,
-    },
-
-    sections: { marginTop: 8 },
-    section: { marginTop: 30 },
-    sectionTitle: {
-      color: c.text,
-      fontSize: 21,
-      fontWeight: "800",
-      fontFamily: FONT.serif,
-      marginBottom: 12,
-    },
-    paragraph: { color: c.textDim, fontSize: 15.5, lineHeight: 26, marginTop: 4 },
-
-    list: { marginTop: 10, gap: 10 },
-    listItem: { flexDirection: "row", alignItems: "flex-start", gap: 12, paddingRight: 4 },
-    bullet: {
-      width: 7,
-      height: 7,
-      borderRadius: 4,
-      backgroundColor: c.primary,
-      marginTop: 9,
-    },
-    listText: { color: c.textDim, fontSize: 15.5, lineHeight: 25, flex: 1 },
-
-    contactCard: {
-      marginTop: 16,
-      borderRadius: 18,
-      borderWidth: 1,
-      borderColor: c.border,
-      backgroundColor: isDark ? c.bgCard : "#FFFFFF",
-      overflow: "hidden",
-    },
-    contactRow: { flexDirection: "row", alignItems: "center", gap: 14, padding: 16 },
-    contactIcon: {
-      width: 40,
-      height: 40,
-      borderRadius: 12,
-      alignItems: "center",
-      justifyContent: "center",
-      backgroundColor: c.soft,
-    },
-    contactLabel: { color: c.textMuted, fontSize: 12, fontWeight: "700", letterSpacing: 0.4 },
-    contactValue: { color: c.text, fontSize: 15.5, fontWeight: "700", marginTop: 2 },
-    contactValueHover: { color: c.primary },
-    contactDivider: { height: 1, backgroundColor: c.border, marginLeft: 70 },
-
-    footerNote: {
-      color: c.textMuted,
-      fontSize: 13,
-      lineHeight: 20,
-      marginTop: 36,
-      textAlign: "center",
-    },
-  });
+  return <LegalDocument uz={UZ} en={EN} crossLinkHref="/terms" />;
 }

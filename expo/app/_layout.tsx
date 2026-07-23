@@ -94,9 +94,11 @@ function RootLayoutNav() {
     const onAuthScreen = segments[0] === "auth";
     const onPublicEncyclopediaScreen = segments[0] === "adib-encyclopedia";
     // Legal pages must be reachable without a session — App Store / Google Play
-    // reviewers open https://adabiyotx.uz/privacy directly in a browser. Cast:
-    // typed-routes hasn't regenerated its union to include this new route yet.
-    const onPublicLegalScreen = (segments[0] as string) === "privacy";
+    // reviewers open https://adabiyotx.uz/privacy and /terms directly in a
+    // browser. Cast: typed-routes hasn't regenerated its union for these new
+    // routes yet.
+    const first = segments[0] as string;
+    const onPublicLegalScreen = first === "privacy" || first === "terms";
     const canEnter =
       isAuthenticated || isGuest || onPublicEncyclopediaScreen || onPublicLegalScreen;
     if (!canEnter && !onAuthScreen) {
@@ -210,6 +212,7 @@ function RootLayoutNav() {
         <Stack.Screen name="payments/xaridlar" options={HIDDEN_HEADER_OPTIONS} />
         <Stack.Screen name="payments/tarifim" options={HIDDEN_HEADER_OPTIONS} />
         <Stack.Screen name="privacy" options={HIDDEN_HEADER_OPTIONS} />
+        <Stack.Screen name="terms" options={HIDDEN_HEADER_OPTIONS} />
       </Stack>
         </View>
       </View>
