@@ -106,7 +106,14 @@ export default function CardPaymentSheet({
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={dismissable ? onClose : undefined}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      {/* iOS lifts the sheet by padding; Android resizes it. Without the
+          Android branch the card / SMS inputs sat under the keyboard. */}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={
+          Platform.OS === "ios" ? "padding" : Platform.OS === "android" ? "height" : undefined
+        }
+      >
         <Pressable style={styles.backdrop} onPress={dismissable ? onClose : undefined}>
           <Pressable
             style={[styles.sheet, state === "paid" ? styles.sheetSuccess : null, { paddingBottom: insets.bottom + 18 }]}
@@ -172,7 +179,11 @@ export default function CardPaymentSheet({
                 onSecondary={onClose}
               />
             ) : (
-              <>
+              <ScrollView
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+                bounces={false}
+              >
                 <View style={styles.headerRow}>
                   <Text style={styles.heading}>Karta orqali to'lash</Text>
                   <Pressable onPress={dismissable ? onClose : undefined} hitSlop={10} style={styles.closeBtn}>
@@ -318,7 +329,7 @@ export default function CardPaymentSheet({
                     </Text>
                   </View>
                 ) : null}
-              </>
+              </ScrollView>
             )}
           </Pressable>
         </Pressable>
@@ -377,6 +388,8 @@ function createStyles(c: AppTheme, isDark: boolean) {
       borderTopRightRadius: 26,
       paddingHorizontal: 22,
       paddingTop: 10,
+      // Bounded so the inner ScrollView can scroll once the keyboard is up.
+      maxHeight: "92%",
     },
     sheetSuccess: { maxHeight: "92%" },
     handle: {

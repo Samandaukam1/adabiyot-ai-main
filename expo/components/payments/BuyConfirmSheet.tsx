@@ -1,9 +1,12 @@
 import { Check, X } from "lucide-react-native";
-import React, { useMemo } from "react";
+import React, { useCallback, useMemo, useRef } from "react";
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -47,16 +50,42 @@ export default function BuyConfirmSheet({
   const insets = useSafeAreaInsets();
   const styles = useMemo(() => createStyles(c, isDark), [c, isDark]);
   const promoActive = !!promo?.isActive && !!promo.pricing;
+  const scrollRef = useRef<ScrollView>(null);
+
+  // Opening the promo field raises the keyboard over the bottom of the sheet.
+  // KeyboardAvoidingView lifts the sheet; this scrolls the input + "Qo'llash"
+  // + the pay button into what's left of the visible area.
+  const handlePromoExpanded = useCallback((expanded: boolean) => {
+    if (!expanded) return;
+    // After the keyboard's own animation, otherwise we scroll the old layout.
+    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 180);
+  }, []);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      {/* iOS pads the sheet up, Android resizes it. On web there is no
+          software keyboard to avoid, so no behavior at all. */}
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={
+          Platform.OS === "ios" ? "padding" : Platform.OS === "android" ? "height" : undefined
+        }
+      >
       <Pressable style={styles.backdrop} onPress={busy ? undefined : onClose}>
         <Pressable
-          style={[styles.sheet, { paddingBottom: insets.bottom + 18 }]}
+          style={styles.sheet}
           onPress={(e) => e.stopPropagation()}
         >
           <View style={styles.handle} />
 
+          <ScrollView
+            ref={scrollRef}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="none"
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+            contentContainerStyle={{ paddingBottom: insets.bottom + 18 }}
+          >
           <View style={styles.headerRow}>
             <Text style={styles.heading}>To'lovni tasdiqlash</Text>
             <Pressable onPress={busy ? undefined : onClose} hitSlop={10} style={styles.closeBtn}>
@@ -115,6 +144,7 @@ export default function BuyConfirmSheet({
                 success={promo.justApplied}
                 onApply={promo.apply}
                 onRemove={promo.remove}
+                onExpandedChange={handlePromoExpanded}
               />
             </View>
           ) : null}
@@ -132,8 +162,10 @@ export default function BuyConfirmSheet({
           <Text style={styles.note}>
             To'lov AdabiyotX backend orqali xavfsiz amalga oshiriladi.
           </Text>
+          </ScrollView>
         </Pressable>
       </Pressable>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -141,6 +173,7 @@ export default function BuyConfirmSheet({
 function createStyles(c: AppTheme, isDark: boolean) {
   const accent = isDark ? c.secondary : DEEP_GREEN;
   return StyleSheet.create({
+    flex: { flex: 1 },
     backdrop: {
       flex: 1,
       backgroundColor: "rgba(0,0,0,0.45)",
@@ -152,6 +185,9 @@ function createStyles(c: AppTheme, isDark: boolean) {
       borderTopRightRadius: 26,
       paddingHorizontal: 22,
       paddingTop: 10,
+      // Bounded so the inner ScrollView can actually scroll once the keyboard
+      // has eaten the bottom half of the screen.
+      maxHeight: "92%",
     },
     handle: {
       alignSelf: "center",

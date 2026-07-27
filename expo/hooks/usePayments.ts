@@ -12,6 +12,7 @@ import { Platform } from "react-native";
 
 import { supabase } from "@/lib/supabase";
 import type { BookAccessReason } from "@/lib/bookAccess";
+import { useReviewFreeBooks } from "@/hooks/useFeatureFlags";
 import {
   checkOrder,
   createCard,
@@ -129,13 +130,22 @@ export function logCreateOrderDebug(paymentProduct: PaymentProduct | null | unde
   });
 }
 
+/**
+ * One place that turns any thrown payment error into something the user can act
+ * on. Order matters: connectivity first, then "sign in", then the kassa notice,
+ * and finally the backend's OWN message for a real 400/500 — never a generic
+ * "to'lov amalga oshmadi" that hides what the server said.
+ */
 function messageForError(error: unknown): string {
   if (error instanceof PaymentApiError) {
-    if (error.code === "payme_not_configured" || error.code === "payme_receipt_failed") return MSG.kassa;
     if (error.code === "network") return MSG.network;
-    if (error.code === "unauthorized") return MSG.unauthorized;
+    // 401 from the backend may arrive with or without an `unauthorized` code.
+    if (error.code === "unauthorized" || error.status === 401) return MSG.unauthorized;
+    if (error.code === "payme_not_configured" || error.code === "payme_receipt_failed") return MSG.kassa;
     return error.message || MSG.failed;
   }
+  // A bare fetch rejection (no response at all) is always connectivity.
+  if (error instanceof TypeError) return MSG.network;
   return MSG.failed;
 }
 
@@ -209,6 +219,10 @@ export function useActiveSubscription(): Entitlement | null {
  *
  * Pass `{ isFree }` when the caller already knows the catalog flag — it short
  * circuits to access without waiting on the network.
+ *
+ * The admin `review_mode_free_books` flag is folded in here so EVERY content
+ * type (book / poem / article / scenario) opens for free while a store review is
+ * in progress, without each screen having to know about the flag.
  */
 export function useContentAccess(
   contentType: PaymentContentType,
@@ -217,8 +231,9 @@ export function useContentAccess(
 ) {
   const { isAuthenticated } = useAuth();
   const query = useMyEntitlements();
+  const reviewFree = useReviewFreeBooks();
   const data = query.data;
-  const isFree = opts?.isFree === true;
+  const isFree = opts?.isFree === true || reviewFree;
 
   const reason = useMemo<BookAccessReason>(() => {
     if (isFree) return "free";
@@ -268,7 +283,9 @@ export function useContentAccessChecker(): (
   contentId: string | null | undefined,
 ) => boolean {
   const { data } = useMyEntitlements();
+  const reviewFree = useReviewFreeBooks();
   return useMemo(() => {
+    if (reviewFree) return (_type, contentId) => !!contentId;
     const owned = new Set<string>();
     let hasSubscription = false;
     if (data) {
@@ -279,7 +296,7 @@ export function useContentAccessChecker(): (
     }
     return (contentType, contentId) =>
       !!contentId && (hasSubscription || owned.has(`${contentType}:${contentId}`));
-  }, [data]);
+  }, [data, reviewFree]);
 }
 
 /* ──────────────────────────  Purchase flow  ─────────────────────────── */

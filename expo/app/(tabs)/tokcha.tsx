@@ -44,6 +44,7 @@ import TokchaBannerCarousel from "@/components/TokchaBannerCarousel";
 import { books, Category, getAuthor, getBook, getBookRoute } from "@/mocks/content";
 import { useAuth } from "@/providers/AuthProvider";
 import { useContentAccessChecker } from "@/hooks/usePayments";
+import { useReviewFreeBooks } from "@/hooks/useFeatureFlags";
 import { usePullToRefresh } from "@/hooks/usePullToRefresh";
 import { usePublishedBooks } from "@/hooks/usePublishedBooks";
 import { usePublishedArticles } from "@/hooks/useArticleContent";
@@ -146,6 +147,7 @@ function MobileTokchaScreen() {
 
   const { userId } = useAuth();
   const hasAccess = useContentAccessChecker();
+  const reviewFree = useReviewFreeBooks();
   const { reading, planned, refresh: refreshShelf } = useShelf();
   const { items: purchasedItems, loading: purchasedLoading } = usePurchasedContent();
   const { books: supabaseBooks, loading: supabaseLoading, error: supabaseError, refetch } = usePublishedBooks();
@@ -177,11 +179,15 @@ function MobileTokchaScreen() {
   }, []);
 
   const allBookCards = useMemo<BookCardData[]>(() => {
-    if (supabaseBooks.length > 0) {
-      return supabaseBooks.map(supabaseBookToCard);
-    }
-    return books.map((b) => mockBookToCard(b)).filter((b): b is BookCardData => b !== null);
-  }, [supabaseBooks]);
+    const cards =
+      supabaseBooks.length > 0
+        ? supabaseBooks.map(supabaseBookToCard)
+        : books.map((b) => mockBookToCard(b)).filter((b): b is BookCardData => b !== null);
+    // Store-review mode opens everything: fold the flag into `free` here, once,
+    // so the "BEPUL" badge, the price label and the Bepul/Pullik filters can
+    // never disagree with what the book detail screen actually offers.
+    return reviewFree ? cards.map((card) => ({ ...card, free: true })) : cards;
+  }, [reviewFree, supabaseBooks]);
 
   const results = useMemo<BookCardData[]>(() => {
     return allBookCards.filter((b) => {

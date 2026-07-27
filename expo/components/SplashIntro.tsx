@@ -19,7 +19,7 @@ import type {
   SplashIntroHapticsStrength,
   SplashIntroHapticType,
 } from "@/types/database";
-import BrandLogo from "@/components/BrandLogo";
+import SplashPulse from "@/components/SplashPulse";
 
 const VIDEO_LOAD_TIMEOUT_MS = 3000;
 
@@ -310,12 +310,12 @@ export default function SplashIntro({ config, onFinish, onShown }: SplashIntroPr
           />
         </Animated.View>
       ) : null}
-      {/* Buffering placeholder. Uses the bare bundled mark (no coloured badge,
-          no remote fetch) so it reads as the same logo the launch screen just
-          showed, rather than a third, different one. */}
+      {/* Buffering placeholder. Logo-free on purpose: the launch sequence must
+          show nothing but the animation, so this is the same pulse the launch
+          gate already had on screen. */}
       {!ready ? (
         <View pointerEvents="none" style={styles.brandLoading}>
-          <BrandLogo variant="splash" size={140} plain bundledOnly />
+          <SplashPulse />
         </View>
       ) : null}
       <View pointerEvents="none" style={styles.vignette} />

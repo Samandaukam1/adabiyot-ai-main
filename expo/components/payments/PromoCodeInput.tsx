@@ -24,6 +24,7 @@ export default function PromoCodeInput({
   success,
   onApply,
   onRemove,
+  onExpandedChange,
 }: {
   appliedCode: string | null;
   validating: boolean;
@@ -31,6 +32,8 @@ export default function PromoCodeInput({
   success: boolean;
   onApply: (code: string) => void;
   onRemove: () => void;
+  /** Fires when the input opens/closes so a sheet can scroll it above the keyboard. */
+  onExpandedChange?: (expanded: boolean) => void;
 }) {
   const { colors: c, isDark } = useTheme();
   const styles = useMemo(() => createStyles(c, isDark), [c, isDark]);
@@ -62,12 +65,17 @@ export default function PromoCodeInput({
     );
   }
 
+  const openInput = () => {
+    setExpanded(true);
+    onExpandedChange?.(true);
+  };
+
   // Collapsed: just the trigger pill.
   if (!expanded) {
     return (
       <Pressable
         accessibilityRole="button"
-        onPress={() => setExpanded(true)}
+        onPress={openInput}
         hitSlop={6}
         style={styles.triggerBtn}
       >
@@ -92,6 +100,7 @@ export default function PromoCodeInput({
     setExpanded(false);
     setCode("");
     setLocalError(null);
+    onExpandedChange?.(false);
   };
 
   const shownError = localError ?? error;
@@ -115,6 +124,10 @@ export default function PromoCodeInput({
             autoFocus
             returnKeyType="done"
             onSubmitEditing={handleApply}
+            // Keeps the sheet's ScrollView from stealing the first tap and
+            // dismissing the keyboard while the code is being typed.
+            blurOnSubmit={false}
+            onFocus={() => onExpandedChange?.(true)}
             editable={!validating}
           />
         </View>

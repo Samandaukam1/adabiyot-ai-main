@@ -53,7 +53,8 @@
             "DEFAULT"
           ]
         }
-      ]
+      ],
+      "versionCode": 4
     },
     "web": {
       "favicon": "./assets/images/favicon.png"
@@ -72,13 +73,9 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 220,
-          "resizeMode": "contain",
-          "backgroundColor": "#F7F4ED",
+          "backgroundColor": "#020806",
           "dark": {
-            "image": "./assets/images/splash-icon.png",
-            "backgroundColor": "#0D1117"
+            "backgroundColor": "#020806"
           }
         }
       ]

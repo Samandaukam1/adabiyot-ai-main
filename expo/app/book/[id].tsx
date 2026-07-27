@@ -48,6 +48,7 @@ import {
   usePaymentProduct,
   usePurchaseFlow,
 } from "@/hooks/usePayments";
+import { useReviewFreeBooks } from "@/hooks/useFeatureFlags";
 import { usePromo } from "@/hooks/usePromo";
 import { useResponsive } from "@/hooks/useResponsive";
 import { useAuth } from "@/providers/AuthProvider";
@@ -97,6 +98,9 @@ export default function BookDetail() {
   );
   const { isAuthenticated } = useAuth();
   const { promptLogin } = useAuthGate();
+  // Store-review mode makes every book behave as `is_free`: no "Sotib olish",
+  // the reader opens straight away.
+  const reviewFree = useReviewFreeBooks();
   const access = useContentAccess("book", mockBook?.id, { isFree: mockBook?.free });
   const purchaseFlow = usePurchaseFlow();
   const paymentProductQuery = usePaymentProduct("book", mockBook?.id);
@@ -209,13 +213,17 @@ export default function BookDetail() {
   const sameCategory = books.filter((b) => b.category === book.category && b.id !== book.id);
   const fallback = books.filter((b) => b.id !== book.id && b.category !== book.category);
   const related = [...sameCategory, ...fallback].slice(0, 5);
-  const purchased = book.free || access.hasAccess;
+  // `isFreeBook` — the catalog flag OR the admin review-mode override. Every
+  // price / CTA / promo decision below reads this, never `book.free` directly,
+  // so the two can never disagree.
+  const isFreeBook = book.free || reviewFree;
+  const purchased = isFreeBook || access.hasAccess;
   const totalReaders = deriveTotalReaders(book, author);
   const audioDuration = deriveAudioDuration(book);
   const ageRating = deriveAgeRating(book);
   // One combined price covers the e-book AND its audio narration — audio is
   // never sold (or priced) separately.
-  const bookPrice = book.free ? 0 : paymentProduct?.amount_uzs ?? book.price;
+  const bookPrice = isFreeBook ? 0 : paymentProduct?.amount_uzs ?? book.price;
   // Entitlements still in flight — we must not claim the book is unpurchased yet.
   const checkingAccess = access.isLoading;
   // Only "loading" until the row lands once — a background refetch must not
@@ -298,7 +306,7 @@ export default function BookDetail() {
   // only for a free or already-owned book, never because a query is pending.
   const purchaseCtaProps = {
     contentId: book.id,
-    isFree: book.free,
+    isFree: isFreeBook,
     purchased,
     checkingAccess,
     productLoading,
@@ -411,7 +419,7 @@ export default function BookDetail() {
 
         <StatBar items={statItems} styles={styles} c={c} />
 
-        {promo.isActive && !purchased && !book.free ? (
+        {promo.isActive && !purchased && !isFreeBook ? (
           <View style={{ paddingHorizontal: 20, marginTop: 14 }}>
             <PromoPriceBlock
               isActive={promo.isActive}
@@ -424,7 +432,7 @@ export default function BookDetail() {
           </View>
         ) : null}
 
-        {!purchased && !book.free && !checkingAccess ? (
+        {!purchased && !isFreeBook && !checkingAccess ? (
           <PressableScale onPress={openBuy}>
             <CombinedPriceCard
               price={bookPrice}
@@ -447,7 +455,7 @@ export default function BookDetail() {
           }
         >
           <CtaButton
-            label="E-adabiyot"
+            label={isFreeBook ? "O'qishni boshlash" : "E-adabiyot"}
             icon="book-open-page-variant"
             gradient={["#11998E", "#38EF7D"]}
             shadowColor="#11998E"
@@ -1121,6 +1129,7 @@ function SupabaseBookDetail({
   const { isWebLayout } = useResponsive();
   const { isAuthenticated } = useAuth();
   const { promptLogin } = useAuthGate();
+  const reviewFree = useReviewFreeBooks();
   const access = useContentAccess("book", book.id, { isFree: book.isFree });
   const purchaseFlow = usePurchaseFlow();
   const paymentProductQuery = usePaymentProduct("book", book.id);
@@ -1177,10 +1186,12 @@ function SupabaseBookDetail({
   const hasFile = !!book.fileUrl || !!book.pdfUrl;
   const isPoem = book.genre === "She'r" || book.contentMode === "poem";
   const canRead = hasRichContent || hasFile || book.source === "supabase";
-  const purchased = book.isFree || access.hasAccess;
+  // Catalog flag OR the admin review-mode override — see the mock screen above.
+  const isFreeBook = book.isFree || reviewFree;
+  const purchased = isFreeBook || access.hasAccess;
   // Entitlements still in flight — we must not claim the book is unpurchased yet.
   const checkingAccess = access.isLoading;
-  const bookPrice = book.isFree ? 0 : paymentProduct?.amount_uzs ?? book.price;
+  const bookPrice = isFreeBook ? 0 : paymentProduct?.amount_uzs ?? book.price;
   // Only "loading" until the row lands once — a background refetch must not
   // disable a CTA whose price is already known.
   const productLoading =
@@ -1214,7 +1225,7 @@ function SupabaseBookDetail({
     { key: "age", icon: <Shield color={c.primary} size={15} />, text: deriveAgeFromGenre(book.genre) },
     { key: "publisher", icon: <Users color={c.primary} size={15} />, text: book.publisherName ? `Nashr: ${book.publisherName}` : "Nashriyot" },
     { key: "audio", icon: <Headphones color={c.primary} size={15} />, text: hasAudio ? "Audio mavjud" : "Audio yo'q" },
-    { key: "price", icon: <Star color={c.primary} size={15} fill={c.primary} />, text: book.isFree ? "Bepul" : formatPrice(bookPrice) },
+    { key: "price", icon: <Star color={c.primary} size={15} fill={c.primary} />, text: isFreeBook ? "Bepul" : formatPrice(bookPrice) },
   ];
 
   const openReader = useCallback(() => {
@@ -1241,7 +1252,7 @@ function SupabaseBookDetail({
   // audio or not.
   const purchaseCtaProps = {
     contentId: book.id,
-    isFree: book.isFree,
+    isFree: isFreeBook,
     purchased,
     checkingAccess,
     productLoading,
@@ -1365,6 +1376,8 @@ function SupabaseBookDetail({
               label={
                 checkingAccess
                   ? "Tekshirilmoqda…"
+                  : isFreeBook
+                  ? "O'qishni boshlash"
                   : purchased
                   ? "O'qishni davom ettirish"
                   : isPoem
@@ -1410,7 +1423,7 @@ function SupabaseBookDetail({
 
         <JaxongirAskBar onPress={() => router.push(`/book-ai/${book.id}`)} />
 
-        {promo.isActive && !purchased && !book.isFree && !checkingAccess ? (
+        {promo.isActive && !purchased && !isFreeBook && !checkingAccess ? (
           <View style={{ marginTop: 14 }}>
             <PromoPriceBlock
               isActive={promo.isActive}
@@ -1426,7 +1439,7 @@ function SupabaseBookDetail({
         {/* The price card appears only once access is settled — a user who already
             owns the book must never be asked to pay for it again. The CTA below
             it stays up while the checks run, in a disabled state. */}
-        {!book.isFree && !purchased && !checkingAccess && (
+        {!isFreeBook && !purchased && !checkingAccess && (
           <PressableScale onPress={openBuy} style={{ marginTop: 14 }}>
             <CombinedPriceCard price={bookPrice} audioAvailable={hasAudio} styles={styles} c={c} />
           </PressableScale>
