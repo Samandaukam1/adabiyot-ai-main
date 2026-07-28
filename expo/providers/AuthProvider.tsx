@@ -17,6 +17,22 @@ import type { ProfileRow } from "@/types/database";
 
 const GUEST_KEY = "adabiyot.guest.v1";
 
+/**
+ * Delete every persisted Supabase session key (`sb-<ref>-auth-token`, plus the
+ * PKCE code verifier). Backed by localStorage on web and the native store on
+ * device, so this is the last line of defence against a sign-out that the
+ * network refused: without it a page refresh re-hydrates the old session.
+ */
+async function purgePersistedAuthKeys(): Promise<void> {
+  try {
+    const keys = await AsyncStorage.getAllKeys();
+    const authKeys = keys.filter((k) => /^sb-.+-auth-token/.test(k));
+    if (authKeys.length) await AsyncStorage.multiRemove(authKeys);
+  } catch (error) {
+    console.warn("[auth] could not purge persisted session", error);
+  }
+}
+
 export const [AuthProvider, useAuth] = createContextHook(() => {
   const [session, setSession] = useState<Session | null>(null);
   const [profileRow, setProfileRow] = useState<ProfileRow | null>(null);
@@ -143,18 +159,35 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     async (input: string | AuthCallbackParams): Promise<boolean> => {
       setLoading(true);
       try {
-        let next =
-          typeof input === "string"
-            ? await createSessionFromUrl(input)
-            : await createSessionFromParams(input);
+        let next: Session | null = null;
+        try {
+          next =
+            typeof input === "string"
+              ? await createSessionFromUrl(input)
+              : await createSessionFromParams(input);
+        } catch (error) {
+          // Exchange failed — but a session may already exist (a second mount
+          // of this screen, a replayed URL). Only rethrow if there really is
+          // none, so the user sees the true reason rather than a blank retry.
+          const { data } = await supabase.auth.getSession();
+          if (!data.session) throw error;
+          console.warn("[AuthCallback] exchange failed but a session exists", error);
+          next = data.session;
+        }
 
-        // On web `detectSessionInUrl` may have consumed the tokens before this
-        // screen ran — the session then already exists, so it isn't an error.
+        // The callback may carry nothing usable (e.g. a bare visit to the
+        // route) — an already-restored session still counts as success.
         if (!next) next = (await supabase.auth.getSession()).data.session ?? null;
         if (!next) return false;
 
         await clearGuest();
-        await syncProfile(next);
+        // The profile RPC must never cost the user their session: they are
+        // signed in, and the row is re-synced on the next focus anyway.
+        try {
+          await syncProfile(next);
+        } catch (error) {
+          console.error("[AuthCallback] profile sync failed:", error);
+        }
         setSession(next);
         return true;
       } finally {
@@ -169,13 +202,46 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     await AsyncStorage.setItem(GUEST_KEY, "1").catch(() => {});
   }, []);
 
+  /**
+   * End the session on this device.
+   *
+   * `supabase.auth.signOut()` bails out *before* clearing local storage when
+   * its network call fails with anything other than 401/403/404 — so an
+   * offline (or slow) sign-out would leave the token on disk and the user
+   * would still be logged in after a refresh. We therefore use the `local`
+   * scope and always purge the persisted `sb-*-auth-token` keys ourselves.
+   *
+   * Throws only when the session genuinely survived, so the caller can tell
+   * the user something actually went wrong.
+   */
   const signOut = useCallback(async () => {
-    await supabase.auth.signOut().catch(() => {});
+    let failure: unknown = null;
+    try {
+      const { error } = await supabase.auth.signOut({ scope: "local" });
+      if (error) failure = error;
+    } catch (error) {
+      failure = error;
+    }
+
+    if (failure) {
+      console.warn("[auth] signOut request failed, purging locally", failure);
+      await purgePersistedAuthKeys();
+    }
+
     setSession(null);
     setProfileRow(null);
     syncedUserId.current = null;
-    await AsyncStorage.removeItem(GUEST_KEY).catch(() => {});
     setIsGuest(false);
+    await AsyncStorage.removeItem(GUEST_KEY).catch(() => {});
+
+    const { data } = await supabase.auth
+      .getSession()
+      .catch(() => ({ data: { session: null } }));
+    if (data.session) {
+      throw failure instanceof Error
+        ? failure
+        : new Error("Sessiyani tugatib bo'lmadi.");
+    }
   }, []);
 
   /** Manually refresh the cached profile row (e.g. after an edit). */

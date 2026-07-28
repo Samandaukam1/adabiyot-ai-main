@@ -4,7 +4,6 @@ import { router } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Platform,
   Pressable,
   StyleSheet,
@@ -16,6 +15,7 @@ import type { AppTheme } from "@/constants/colors";
 import BrandLogo from "@/components/BrandLogo";
 import { FONT, PressableScale } from "@/components/ui";
 import { isAppleSignInAvailable } from "@/lib/auth";
+import { notify } from "@/utils/dialogs";
 import { useAuth } from "@/providers/AuthProvider";
 import { useBranding } from "@/providers/BrandingProvider";
 import { useTheme } from "@/providers/ThemeProvider";
@@ -37,12 +37,17 @@ export default function AuthScreen() {
     isAppleSignInAvailable().then(setAppleAvailable);
   }, []);
 
+  // On web these return false: `signInWithOAuth` redirects the whole tab to the
+  // provider and `/auth/callback` finishes the job, so there's nothing to
+  // navigate to here. A thrown error is real and must be shown — via `notify`,
+  // since `Alert.alert` is a no-op in the browser.
   const handleGoogle = async () => {
     try {
       const ok = await signInWithGoogle();
       if (ok) router.replace("/(tabs)");
     } catch (e) {
-      Alert.alert(
+      console.error("[AuthScreen] Google sign-in failed:", e);
+      notify(
         "Kirishda xatolik",
         e instanceof Error ? e.message : "Google bilan kirib bo'lmadi. Qayta urinib ko'ring."
       );
@@ -54,7 +59,8 @@ export default function AuthScreen() {
       const ok = await signInWithApple();
       if (ok) router.replace("/(tabs)");
     } catch (e) {
-      Alert.alert(
+      console.error("[AuthScreen] Apple sign-in failed:", e);
+      notify(
         "Kirishda xatolik",
         e instanceof Error ? e.message : "Apple bilan kirib bo'lmadi. Qayta urinib ko'ring."
       );

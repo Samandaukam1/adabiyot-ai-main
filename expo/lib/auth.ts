@@ -58,7 +58,12 @@ const NATIVE_AUTH_CALLBACK_URL = `${APP_SCHEME}://${AUTH_CALLBACK_PATH}`;
 export function getAuthRedirectUri(): string {
   if (Platform.OS !== "web") return NATIVE_AUTH_CALLBACK_URL;
   const origin = typeof window !== "undefined" ? window.location?.origin : null;
-  return origin ? `${origin}/${AUTH_CALLBACK_PATH}` : WEB_AUTH_CALLBACK_URL;
+  // A dev-server origin must never be sent to the provider: it isn't in the
+  // Supabase redirect allow-list, so the user would be bounced to a dead page.
+  if (!origin || /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:\d+)?$/i.test(origin)) {
+    return WEB_AUTH_CALLBACK_URL;
+  }
+  return `${origin}/${AUTH_CALLBACK_PATH}`;
 }
 
 function firstNonEmpty(...values: (string | null | undefined)[]): string | null {
@@ -90,18 +95,34 @@ export async function createSessionFromParams(
 
   const { access_token, refresh_token, code } = params;
 
+  // Implicit grant — the tokens are already in the fragment, just adopt them.
   if (access_token) {
     const { data, error } = await supabase.auth.setSession({
       access_token,
       refresh_token: refresh_token ?? "",
     });
-    if (error) throw error;
+    if (error) {
+      console.error("[AuthCallback] setSession failed:", error.message);
+      throw error;
+    }
     return data.session;
   }
 
+  // PKCE — trade the single-use authorization code for a session.
   if (code) {
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-    if (error) throw error;
+    if (error) {
+      console.error("[AuthCallback] exchangeCodeForSession failed:", error.message);
+      // A code is single-use: if something already spent it (a double mount, a
+      // reload of the callback URL) the session exists even though this call
+      // errored. Prefer the live session over reporting a failure.
+      const { data: existing } = await supabase.auth.getSession();
+      if (existing.session) {
+        console.warn("[AuthCallback] code already spent — using the live session");
+        return existing.session;
+      }
+      throw error;
+    }
     return data.session;
   }
 
@@ -113,6 +134,53 @@ export async function createSessionFromUrl(url: string): Promise<Session | null>
   const { params, errorCode } = getQueryParams(url);
   if (errorCode) throw new Error(errorCode);
   return createSessionFromParams(params);
+}
+
+/**
+ * Read the OAuth result out of the browser's own location — the `?code=` of a
+ * PKCE redirect, the `#access_token=…` of an implicit one, and any provider
+ * error. Returns `{}` off-web or when the URL carries nothing.
+ */
+export function readWebCallbackParams(): AuthCallbackParams {
+  if (Platform.OS !== "web" || typeof window === "undefined") return {};
+
+  const url = new URL(window.location.href);
+  const params: AuthCallbackParams = {};
+
+  const code = url.searchParams.get("code");
+  if (code) params.code = code;
+
+  for (const key of ["error", "error_description", "error_code", "state"] as const) {
+    const value = url.searchParams.get(key);
+    if (value) params[key] = value;
+  }
+
+  // Implicit grant puts everything in the fragment.
+  if (url.hash.length > 1) {
+    new URLSearchParams(url.hash.replace(/^#/, "")).forEach((value, key) => {
+      if (value) params[key] = value;
+    });
+  }
+
+  return params;
+}
+
+/**
+ * Drop the OAuth artefacts from the address bar once they're spent, so a
+ * refresh can't replay a dead code and the token never lands in history.
+ */
+export function clearWebCallbackUrl(): void {
+  if (Platform.OS !== "web" || typeof window === "undefined") return;
+  try {
+    const url = new URL(window.location.href);
+    for (const key of ["code", "state", "error", "error_description", "error_code"]) {
+      url.searchParams.delete(key);
+    }
+    url.hash = "";
+    window.history.replaceState(window.history.state, "", url.toString());
+  } catch (error) {
+    console.warn("[AuthCallback] could not clean the callback URL", error);
+  }
 }
 
 export interface SignInResult {
@@ -167,23 +235,53 @@ async function signInWithOAuthBrowser(
   queryParams?: Record<string, string>
 ): Promise<SignInResult | null> {
   const redirectTo = getAuthRedirectUri();
-  if (__DEV__) console.log(`[${label}Login] start → redirectTo`, redirectTo);
+  if (__DEV__) {
+    console.log(`[${label}Login] start`, {
+      platform: Platform.OS,
+      redirectTo,
+    });
+  }
+
+  if (Platform.OS === "web") {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo,
+        queryParams,
+      },
+    });
+
+    if (error) {
+      if (__DEV__) console.error(`[${label}Login] web signInWithOAuth error`, error.message);
+      throw friendlyProviderError(error, label);
+    }
+
+    return null;
+  }
 
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider,
-    options: { redirectTo, skipBrowserRedirect: true, queryParams },
+    options: {
+      redirectTo,
+      skipBrowserRedirect: true,
+      queryParams,
+    },
   });
+
   if (error) {
-    if (__DEV__) console.error(`[${label}Login] signInWithOAuth error`, error.message);
+    if (__DEV__) console.error(`[${label}Login] native signInWithOAuth error`, error.message);
     throw friendlyProviderError(error, label);
   }
+
   if (!data?.url) throw new Error(`${label} kirish manzili olinmadi`);
 
   const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
+
   if (result.type === "cancel" || result.type === "dismiss") {
     if (__DEV__) console.log(`[${label}Login] canceled by user`);
     return null;
   }
+
   if (result.type !== "success" || !result.url) {
     if (__DEV__) console.error(`[${label}Login] browser session failed`, result.type);
     throw new Error(
@@ -193,6 +291,7 @@ async function signInWithOAuthBrowser(
 
   const session = await createSessionFromUrl(result.url);
   if (!session) throw new Error("Sessiya yaratilmadi");
+
   if (__DEV__) console.log(`[${label}Login] session created`);
   return { session, provider };
 }

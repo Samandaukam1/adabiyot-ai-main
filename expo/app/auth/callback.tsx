@@ -6,71 +6,102 @@ import { FONT, PressableScale } from "@/components/ui";
 import { useAuth } from "@/providers/AuthProvider";
 import { useTheme } from "@/providers/ThemeProvider";
 import type { AppTheme } from "@/constants/colors";
-import type { AuthCallbackParams } from "@/lib/auth";
+import {
+  clearWebCallbackUrl,
+  readWebCallbackParams,
+  type AuthCallbackParams,
+} from "@/lib/auth";
 
 /**
  * OAuth landing screen — `adabiyotx://auth/callback` on native and
  * `https://adabiyotx.uz/auth/callback` on the web.
  *
- * The in-app browser normally resolves the sign-in itself (see
- * `signInWithOAuthBrowser`), so this screen is the path for everything else:
- * a provider that bounces through the system browser, a cold start from the
- * deep link, and every web sign-in. Once the session exists the root layout
- * moves the user into the tabs on its own.
+ * This screen OWNS the code→session exchange (the Supabase client runs with
+ * `detectSessionInUrl: false`, so nothing else touches the URL). It handles
+ * both shapes a provider can return:
+ *
+ *   ?code=…                            → exchangeCodeForSession   (PKCE)
+ *   #access_token=…&refresh_token=…    → setSession               (implicit)
+ *
+ * On native the deep link arrives already normalised into search params by
+ * `+native-intent`; on web we read `window.location` directly.
  */
+const CALLBACK_TIMEOUT_MS = 20_000;
+
 export default function AuthCallbackScreen() {
   const { colors: c } = useTheme();
   const { completeOAuthCallback } = useAuth();
   const params = useLocalSearchParams();
   const styles = useMemo(() => createStyles(c), [c]);
-  const [failed, setFailed] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const handled = useRef(false);
 
   useEffect(() => {
     if (handled.current) return;
+    handled.current = true;
 
-    const finish = async () => {
-      if (handled.current) return;
-      handled.current = true;
+    let done = false;
+
+    // Never leave the user on a spinner: if the exchange hangs (offline, a
+    // provider that never answers) surface it instead of spinning forever.
+    const timeout = setTimeout(() => {
+      if (done) return;
+      done = true;
+      console.error("[AuthCallback] timed out waiting for the session exchange");
+      setErrorMessage("Kirish juda uzoq davom etdi. Qaytadan urinib ko'ring.");
+    }, CALLBACK_TIMEOUT_MS);
+
+    (async () => {
       try {
-        // The web URL still holds the raw query/fragment; on native the link was
-        // already normalised into search params by `+native-intent`.
-        const fromBrowser =
-          Platform.OS === "web" &&
-          typeof window !== "undefined" &&
-          (window.location.search.length > 1 || window.location.hash.length > 1);
+        // Web: the raw ?code= / #access_token= from the address bar.
+        // Native: the params expo-router parsed out of the deep link.
+        const callbackParams: AuthCallbackParams =
+          Platform.OS === "web"
+            ? readWebCallbackParams()
+            : (params as AuthCallbackParams);
 
-        const ok = await completeOAuthCallback(
-          fromBrowser ? window.location.href : (params as AuthCallbackParams)
-        );
-        if (ok) router.replace("/(tabs)");
-        else setFailed(true);
+        console.log("[AuthCallback] handling redirect", {
+          platform: Platform.OS,
+          hasCode: !!callbackParams.code,
+          hasAccessToken: !!callbackParams.access_token,
+          error: callbackParams.error ?? null,
+        });
+
+        const ok = await completeOAuthCallback(callbackParams);
+        if (done) return;
+        done = true;
+        clearTimeout(timeout);
+
+        if (ok) {
+          // Spent code / token must not linger in the address bar.
+          clearWebCallbackUrl();
+          console.log("[AuthCallback] session created");
+          router.replace("/");
+          return;
+        }
+
+        console.error("[AuthCallback] callback carried no code or token");
+        setErrorMessage("Kirish ma'lumotlari topilmadi. Qaytadan urinib ko'ring.");
       } catch (error) {
-        if (__DEV__) console.error("[AuthCallback] failed", error);
-        setFailed(true);
+        if (done) return;
+        done = true;
+        clearTimeout(timeout);
+        const message = error instanceof Error ? error.message : String(error);
+        console.error("[AuthCallback]", message, error);
+        setErrorMessage(message);
       }
-    };
+    })();
 
-    // On web the provider lands in a popup: expo-web-browser posts the URL back
-    // to the window that started the sign-in and closes this one, so that window
-    // owns the exchange. Only step in if the hand-off never happens.
-    const inAuthPopup =
-      Platform.OS === "web" && typeof window !== "undefined" && !!window.opener;
-    if (inAuthPopup) {
-      const timer = setTimeout(finish, 2500);
-      return () => clearTimeout(timer);
-    }
-
-    finish();
+    return () => clearTimeout(timeout);
   }, [completeOAuthCallback, params]);
 
   return (
     <View style={styles.root}>
-      {failed ? (
+      {errorMessage ? (
         <>
           <Ionicons name="alert-circle-outline" size={40} color={c.textDim} />
           <Text style={styles.title}>Kirishni yakunlab bo'lmadi</Text>
-          <Text style={styles.hint}>Iltimos, qayta urinib ko'ring.</Text>
+          <Text style={styles.hint}>{errorMessage}</Text>
           <PressableScale onPress={() => router.replace("/auth")} style={styles.btn}>
             <Text style={styles.btnText}>Kirish sahifasiga qaytish</Text>
           </PressableScale>
