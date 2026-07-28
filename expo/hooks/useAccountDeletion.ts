@@ -1,85 +1,82 @@
 /**
- * In-app "Akkauntni o'chirish" request — required by both App Store and Google
- * Play for any app with accounts.
+ * Irreversible in-app account deletion (Apple App Review guideline 5.1.1 (v)).
  *
- * Nothing is deleted on device: the RPC files a row the team reviews. The user's
- * open request is read back so Settings can show "so'rov yuborilgan" instead of
- * offering the same action again.
+ * Order matters and is not negotiable:
+ *   1. the Edge Function confirms the account is really gone,
+ *   2. only then the local caches / session are wiped and the user signed out.
+ *
+ * A failed request leaves the user signed in with an intact account and a clear
+ * message — the app never claims a deletion it did not get confirmation for.
  */
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useCallback, useRef, useState } from "react";
 
-import { supabase } from "@/lib/supabase";
+import {
+  AccountDeletionError,
+  accountDeletionMessage,
+  deleteOwnAccount,
+  purgeLocalAccountData,
+} from "@/lib/accountDeletion";
 import { useAuth } from "@/providers/AuthProvider";
 
-export type AccountDeletionStatus = "pending" | "approved" | "rejected" | "completed";
-
-export interface AccountDeletionRequest {
-  id: string;
-  status: AccountDeletionStatus;
-  reason: string | null;
-  requestedAt: string | null;
-}
-
-const QUERY_KEY = ["account-deletion-request"] as const;
-
-function normalize(row: unknown): AccountDeletionRequest | null {
-  if (!row || typeof row !== "object") return null;
-  const r = row as Record<string, unknown>;
-  if (typeof r.id !== "string") return null;
-  const status = typeof r.status === "string" ? r.status : "pending";
-  return {
-    id: r.id,
-    status: status as AccountDeletionStatus,
-    reason: typeof r.reason === "string" ? r.reason : null,
-    requestedAt: typeof r.requested_at === "string" ? r.requested_at : null,
-  };
-}
+export type AccountDeletionState = "idle" | "deleting" | "done";
 
 export function useAccountDeletion() {
   const queryClient = useQueryClient();
-  const { userId, isAuthenticated } = useAuth();
-  const [submitting, setSubmitting] = useState(false);
+  const { userId, isAuthenticated, signOut } = useAuth();
+  const [state, setState] = useState<AccountDeletionState>("idle");
+  const [error, setError] = useState<string | null>(null);
+  // Guards against a double tap firing two deletions before `state` re-renders.
+  const busy = useRef(false);
 
-  const query = useQuery({
-    queryKey: [...QUERY_KEY, userId],
-    queryFn: async (): Promise<AccountDeletionRequest | null> => {
-      const { data, error } = await (supabase as any).rpc("get_my_account_deletion_request");
-      // The migration may not be applied yet — an absent function must not blow
-      // up the Settings screen, it just means "no request on file".
-      if (error) return null;
-      return normalize(Array.isArray(data) ? data[0] : data);
-    },
-    enabled: isAuthenticated,
-    staleTime: 60_000,
-    retry: 0,
-  });
+  /**
+   * Runs the whole flow. Returns true only when the server confirmed the
+   * deletion; on false, `error` holds the message to show.
+   */
+  const deleteAccount = useCallback(async (): Promise<boolean> => {
+    if (busy.current) return false;
+    if (!isAuthenticated) {
+      setError("Hisobni o'chirish uchun avval akkauntga kiring.");
+      return false;
+    }
 
-  /** Files the request. Throws with a user-readable message on failure. */
-  const requestDeletion = useCallback(
-    async (reason?: string | null): Promise<AccountDeletionRequest | null> => {
-      setSubmitting(true);
-      try {
-        const { data, error } = await (supabase as any).rpc("request_my_account_deletion", {
-          reason: reason?.trim() ? reason.trim() : null,
-        });
-        if (error) throw new Error(error.message || "So'rovni yuborib bo'lmadi.");
-        const row = normalize(Array.isArray(data) ? data[0] : data);
-        await queryClient.invalidateQueries({ queryKey: QUERY_KEY });
-        return row;
-      } finally {
-        setSubmitting(false);
-      }
-    },
-    [queryClient]
-  );
+    busy.current = true;
+    setError(null);
+    setState("deleting");
 
-  const request = query.data ?? null;
+    const deletedUserId = userId;
+
+    try {
+      await deleteOwnAccount();
+    } catch (err) {
+      setError(accountDeletionMessage(err));
+      setState("idle");
+      busy.current = false;
+      if (!(err instanceof AccountDeletionError)) console.error("[accountDeletion]", err);
+      return false;
+    }
+
+    // Server confirmed. Everything below is local cleanup and must not be able
+    // to fail the flow — the account no longer exists either way.
+    try {
+      queryClient.clear();
+      await purgeLocalAccountData(deletedUserId);
+      await signOut();
+    } catch (err) {
+      console.warn("[accountDeletion] local sign-out after deletion failed", err);
+    }
+
+    setState("done");
+    busy.current = false;
+    return true;
+  }, [isAuthenticated, queryClient, signOut, userId]);
+
   return {
-    request,
-    hasPendingRequest: request?.status === "pending",
-    loading: query.isLoading,
-    submitting,
-    requestDeletion,
+    deleteAccount,
+    state,
+    isDeleting: state === "deleting",
+    isDone: state === "done",
+    error,
+    clearError: useCallback(() => setError(null), []),
   };
 }

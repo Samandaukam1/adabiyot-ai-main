@@ -210,6 +210,7 @@ function RootLayoutNav() {
         <Stack.Screen name="creator/submit" options={HIDDEN_HEADER_OPTIONS} />
         <Stack.Screen name="author-application" options={HIDDEN_HEADER_OPTIONS} />
         <Stack.Screen name="settings/index" options={HIDDEN_HEADER_OPTIONS} />
+        <Stack.Screen name="settings/delete-account" options={HIDDEN_HEADER_OPTIONS} />
         <Stack.Screen name="edit-profile" options={HIDDEN_HEADER_OPTIONS} />
         <Stack.Screen name="adiblar/index" options={HIDDEN_HEADER_OPTIONS} />
         <Stack.Screen name="adiblar/[id]" options={HIDDEN_HEADER_OPTIONS} />

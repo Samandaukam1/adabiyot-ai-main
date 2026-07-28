@@ -1,4 +1,4 @@
-import { Check, Star } from "lucide-react-native";
+import { ArrowRight, Check, Star } from "lucide-react-native";
 import React, { useMemo } from "react";
 import { StyleSheet, Text, View } from "react-native";
 
@@ -47,6 +47,7 @@ export default function TariffCard({
 
       <PressableScale onPress={() => onSelect(tariff)} style={styles.cta}>
         <Text style={styles.ctaText}>Tanlash</Text>
+        <ArrowRight color={highlighted ? c.primary : "#fff"} size={20} strokeWidth={2.6} />
       </PressableScale>
     </View>
   );
@@ -108,16 +109,24 @@ function createStyles(c: AppTheme, highlighted: boolean) {
       color: highlighted ? "rgba(255,255,255,0.95)" : c.text,
       lineHeight: 20,
     },
+    // Deliberately tall + shadowed: this is the primary action of the screen.
     cta: {
       marginTop: 22,
-      height: 52,
-      borderRadius: 15,
+      height: 62,
+      borderRadius: 18,
       backgroundColor: highlighted ? "#fff" : c.primary,
       alignItems: "center",
       justifyContent: "center",
+      flexDirection: "row",
+      gap: 9,
+      shadowColor: highlighted ? "#000" : c.primary,
+      shadowOpacity: highlighted ? 0.14 : 0.3,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 4,
     },
     ctaText: {
-      fontSize: 16,
+      fontSize: 18,
       fontWeight: "800",
       letterSpacing: 0.3,
       color: highlighted ? c.primary : "#fff",

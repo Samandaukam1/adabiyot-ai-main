@@ -14,7 +14,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { AppTheme } from "@/constants/colors";
 import SettingsRow from "@/components/SettingsRow";
 import { FONT } from "@/components/ui";
-import { useAccountDeletion } from "@/hooks/useAccountDeletion";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { useIsAuthor } from "@/hooks/useAuthorAccount";
 import { useTariffsVisible } from "@/hooks/useFeatureFlags";
@@ -41,11 +40,6 @@ export default function SettingsScreen() {
   // Admin flag. Hides only the subscription/tariff MENU — buying a single book
   // still works, the payment system itself is never switched off here.
   const tariffsVisible = useTariffsVisible();
-  const {
-    hasPendingRequest: deletionPending,
-    submitting: deletionSubmitting,
-    requestDeletion,
-  } = useAccountDeletion();
 
   const handleRestorePurchases = useCallback(async () => {
     if (isRestoring) return;
@@ -124,51 +118,16 @@ export default function SettingsScreen() {
     }
   }, [isAuthenticated, isGuest, signOut, signingOut]);
 
-  // Account deletion request. Nothing is wiped on device — the RPC files a
-  // request the team reviews, which is what both stores ask for.
-  const handleDeleteAccount = useCallback(async () => {
-    if (deletionSubmitting) return;
-
+  // Step 1 of the deletion flow. The warning + the typed final confirmation
+  // live on their own screen (`/settings/delete-account`) so App Review can see
+  // the whole path, and so nothing can be deleted by one stray tap here.
+  const handleDeleteAccount = useCallback(() => {
     if (!isAuthenticated) {
-      notify(
-        "Akkauntni o'chirish",
-        "Akkauntni o'chirish uchun avval akkauntga kiring."
-      );
+      notify("Hisobni o'chirish", "Hisobni o'chirish uchun avval akkauntga kiring.");
       return;
     }
-
-    if (deletionPending) {
-      notify(
-        "So'rov allaqachon yuborilgan",
-        "Akkauntni o'chirish so'rovingiz ko'rib chiqilmoqda."
-      );
-      return;
-    }
-
-    const confirmed = await confirmAsync({
-      title: "Akkauntni o'chirish",
-      message:
-        "Akkauntingizni o'chirish so'rovi yuboriladi. Bu jarayon qaytarilmas bo'lishi mumkin.",
-      confirmText: "So'rov yuborish",
-      destructive: true,
-    });
-    if (!confirmed) return;
-
-    try {
-      await requestDeletion(null);
-    } catch (error) {
-      notify(
-        "So'rovni yuborib bo'lmadi",
-        error instanceof Error ? error.message : "Qaytadan urinib ko'ring."
-      );
-      return;
-    }
-
-    notify(
-      "So'rov yuborildi",
-      "Akkauntni o'chirish so'rovi yuborildi. Jamoamiz uni ko'rib chiqadi."
-    );
-  }, [deletionPending, deletionSubmitting, isAuthenticated, requestDeletion]);
+    router.push("/settings/delete-account" as never);
+  }, [isAuthenticated]);
 
   return (
     <View style={{ flex: 1, backgroundColor: c.bg }}>
@@ -510,21 +469,17 @@ export default function SettingsScreen() {
           </Pressable>
         </View>
 
-        {/* ─── Akkauntni o'chirish (store requirement) ──────────── */}
+        {/* ─── Hisobni o'chirish (App Review guideline 5.1.1) ───── */}
         <View style={[styles.card, styles.authCard, { marginTop: 12 }]}>
           <SettingsRow
-            icon={deletionPending ? "clock-outline" : "account-remove-outline"}
+            icon="account-remove-outline"
             iconColor="#EF4444"
             iconBg={isDark ? "#2A1515" : "#FEF2F2"}
-            label="Akkauntni o'chirish"
+            label="Hisobni butunlay o'chirish"
             description={
-              deletionSubmitting
-                ? "So'rov yuborilmoqda…"
-                : deletionPending
-                  ? "So'rovingiz ko'rib chiqilmoqda"
-                  : !isAuthenticated
-                    ? "Akkauntni o'chirish uchun avval akkauntga kiring"
-                    : "Akkauntingizni o'chirish so'rovini yuborish"
+              isAuthenticated
+                ? "Hisobingiz va shaxsiy ma'lumotlaringiz butunlay o'chiriladi"
+                : "Hisobni o'chirish uchun avval akkauntga kiring"
             }
             onPress={handleDeleteAccount}
             isLast

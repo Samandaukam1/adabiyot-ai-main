@@ -1,4 +1,4 @@
-import { Check, X } from "lucide-react-native";
+import { ArrowRight, Check, X } from "lucide-react-native";
 import React, { useCallback, useMemo, useRef } from "react";
 import {
   ActivityIndicator,
@@ -156,6 +156,7 @@ export default function BuyConfirmSheet({
             <View style={styles.ctaInner}>
               {busy ? <ActivityIndicator color="#fff" size="small" /> : null}
               <Text style={styles.ctaText}>{busy ? "Iltimos, kuting…" : "To'lovni davom ettirish"}</Text>
+              {busy ? null : <ArrowRight color="#fff" size={21} strokeWidth={2.6} />}
             </View>
           </PressableScale>
 
@@ -248,17 +249,24 @@ function createStyles(c: AppTheme, isDark: boolean) {
       justifyContent: "center",
     },
     benefitText: { flex: 1, fontSize: 14.5, color: c.text, lineHeight: 20 },
+    // The pay button is the whole point of this sheet — tall, shadowed and
+    // impossible to mistake for the secondary rows above it.
     cta: {
       marginTop: 24,
-      height: 54,
-      borderRadius: 16,
+      height: 62,
+      borderRadius: 18,
       backgroundColor: c.primary,
       alignItems: "center",
       justifyContent: "center",
+      shadowColor: c.primary,
+      shadowOpacity: isDark ? 0.34 : 0.28,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 5,
     },
-    ctaDisabled: { backgroundColor: c.textMuted },
+    ctaDisabled: { backgroundColor: c.textMuted, shadowOpacity: 0, elevation: 0 },
     ctaInner: { flexDirection: "row", alignItems: "center", gap: 10 },
-    ctaText: { color: "#fff", fontSize: 16, fontWeight: "800", letterSpacing: 0.3 },
+    ctaText: { color: "#fff", fontSize: 18, fontWeight: "800", letterSpacing: 0.3 },
     note: {
       marginTop: 12,
       fontSize: 12,

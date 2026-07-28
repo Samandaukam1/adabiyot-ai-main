@@ -1,5 +1,5 @@
 import { router } from "expo-router";
-import { CalendarClock, ChevronLeft, Crown, Info } from "lucide-react-native";
+import { ArrowRight, CalendarClock, ChevronLeft, Crown, Info } from "lucide-react-native";
 import React, { useMemo } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -91,6 +91,7 @@ export default function TarifimScreen() {
             ) : null}
 
             <PressableScale onPress={() => router.push("/payments/tariflar")} style={styles.renewBtn}>
+              <Crown color="#fff" size={20} fill="#fff" />
               <Text style={styles.renewText}>Tarifni yangilash</Text>
             </PressableScale>
 
@@ -114,7 +115,9 @@ export default function TarifimScreen() {
               onPress={() => router.push(isAuthenticated ? "/payments/tariflar" : "/auth")}
               style={styles.renewBtn}
             >
+              <Crown color="#fff" size={20} fill="#fff" />
               <Text style={styles.renewText}>Tarif tanlash</Text>
+              <ArrowRight color="#fff" size={20} strokeWidth={2.6} />
             </PressableScale>
           </View>
         )}
@@ -193,15 +196,25 @@ function createStyles(c: AppTheme, _isDark: boolean) {
     limitRowLast: { borderBottomWidth: 0 },
     limitLabel: { fontSize: 14.5, color: c.textDim, fontWeight: "600" },
     limitValue: { fontSize: 15, color: c.text, fontWeight: "800" },
+    // The screen's primary action — tall, full-width and shadowed so it reads
+    // as the obvious next step rather than a secondary link.
     renewBtn: {
-      marginTop: 18,
-      height: 52,
-      borderRadius: 15,
+      marginTop: 22,
+      width: "100%",
+      height: 62,
+      borderRadius: 18,
       backgroundColor: c.primary,
+      flexDirection: "row",
       alignItems: "center",
       justifyContent: "center",
+      gap: 10,
+      shadowColor: c.primary,
+      shadowOpacity: 0.3,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 5,
     },
-    renewText: { color: "#fff", fontSize: 16, fontWeight: "800", letterSpacing: 0.3 },
+    renewText: { color: "#fff", fontSize: 18, fontWeight: "800", letterSpacing: 0.3 },
     noteCard: {
       marginTop: 16,
       flexDirection: "row",
@@ -212,7 +225,7 @@ function createStyles(c: AppTheme, _isDark: boolean) {
       alignItems: "flex-start",
     },
     noteText: { flex: 1, fontSize: 13, color: c.textDim, lineHeight: 19 },
-    empty: { alignItems: "center", marginTop: 50, paddingHorizontal: 10 },
+    empty: { alignItems: "center", marginTop: 50, paddingHorizontal: 10, alignSelf: "stretch" },
     emptyIcon: {
       width: 64,
       height: 64,
