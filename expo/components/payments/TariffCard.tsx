@@ -1,3 +1,4 @@
+import { LinearGradient } from "expo-linear-gradient";
 import { ArrowRight, Check, Star } from "lucide-react-native";
 import React, { useMemo } from "react";
 import { StyleSheet, Text, View } from "react-native";
@@ -6,6 +7,9 @@ import { PressableScale } from "@/components/ui";
 import { formatUzs, type Tariff } from "@/constants/tariffs";
 import type { AppTheme } from "@/constants/colors";
 import { useTheme } from "@/providers/ThemeProvider";
+
+const DEEP_GREEN = "#0B5A3A";
+const GRADIENT: [string, string] = [DEEP_GREEN, "#11998E"];
 
 /** A single AdabiyotX tariff card with optional highlight badge + "Tanlash" CTA. */
 export default function TariffCard({
@@ -45,9 +49,25 @@ export default function TariffCard({
         ))}
       </View>
 
-      <PressableScale onPress={() => onSelect(tariff)} style={styles.cta}>
-        <Text style={styles.ctaText}>Tanlash</Text>
-        <ArrowRight color={highlighted ? c.primary : "#fff"} size={20} strokeWidth={2.6} />
+      {/* On the highlighted (green) card a white pill gives the contrast; on a
+          plain card the gradient does. Neither uses a coloured glow. */}
+      <PressableScale onPress={() => onSelect(tariff)} style={styles.ctaWrap}>
+        {highlighted ? (
+          <View style={[styles.cta, styles.ctaSolid]}>
+            <Text style={styles.ctaText}>Tanlash</Text>
+            <ArrowRight color={DEEP_GREEN} size={20} strokeWidth={2.6} />
+          </View>
+        ) : (
+          <LinearGradient
+            colors={GRADIENT}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.cta}
+          >
+            <Text style={styles.ctaText}>Tanlash</Text>
+            <ArrowRight color="#fff" size={20} strokeWidth={2.6} />
+          </LinearGradient>
+        )}
       </PressableScale>
     </View>
   );
@@ -109,27 +129,31 @@ function createStyles(c: AppTheme, highlighted: boolean) {
       color: highlighted ? "rgba(255,255,255,0.95)" : c.text,
       lineHeight: 20,
     },
-    // Deliberately tall + shadowed: this is the primary action of the screen.
-    cta: {
+    // Deliberately tall — this is the primary action of the card. The shadow is
+    // neutral and low; a bright coloured halo reads as a rendering artefact.
+    ctaWrap: {
       marginTop: 22,
-      height: 62,
       borderRadius: 18,
-      backgroundColor: highlighted ? "#fff" : c.primary,
+      overflow: "hidden",
+      shadowColor: "#000",
+      shadowOpacity: highlighted ? 0.16 : 0.12,
+      shadowRadius: 12,
+      shadowOffset: { width: 0, height: 5 },
+      elevation: 3,
+    },
+    cta: {
+      height: 60,
       alignItems: "center",
       justifyContent: "center",
       flexDirection: "row",
       gap: 9,
-      shadowColor: highlighted ? "#000" : c.primary,
-      shadowOpacity: highlighted ? 0.14 : 0.3,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 6 },
-      elevation: 4,
     },
+    ctaSolid: { backgroundColor: "#fff" },
     ctaText: {
-      fontSize: 18,
+      fontSize: 17.5,
       fontWeight: "800",
       letterSpacing: 0.3,
-      color: highlighted ? c.primary : "#fff",
+      color: highlighted ? DEEP_GREEN : "#fff",
     },
   });
 }
