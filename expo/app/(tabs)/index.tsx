@@ -179,7 +179,13 @@ const ChipRow = memo(function ChipRow({
                 size={14}
               />
             )}
-            <Text style={{ color: isActive ? "#fff" : L.textDim, fontSize: 12, fontWeight: "600" }}>{c}</Text>
+            <Text
+              numberOfLines={1}
+              ellipsizeMode="tail"
+              style={[chipLabel, { color: isActive ? "#fff" : L.textDim, fontWeight: "600" }]}
+            >
+              {c}
+            </Text>
           </AnimatedPressable>
         );
       })}
@@ -265,10 +271,14 @@ const LatestChip = memo(function LatestChip({
       >
         <MaterialCommunityIcons
           name="star-four-points"
-          size={13}
+          size={14}
           color={active ? "#fff" : L.primary}
         />
-        <Text style={{ color: active ? "#fff" : L.primary, fontSize: 12, fontWeight: "800" }}>
+        <Text
+          numberOfLines={1}
+          ellipsizeMode="tail"
+          style={[chipLabel, { color: active ? "#fff" : L.primary, fontWeight: "800" }]}
+        >
           {LATEST_CHIP}
         </Text>
       </AnimatedPressable>
@@ -668,18 +678,23 @@ const SkeletonBox = memo(function SkeletonBox({ w, h, r = 12 }: { w: number | `$
 });
 
 // ─── Style helpers ─────────────────────────────────────────────────────────────
-// The vertical padding is what keeps the "Eng yangi" halo from being clipped by
-// the horizontal ScrollView on Android.
-const chipRowStyle = { paddingHorizontal: 16, paddingVertical: 7, gap: 8, alignItems: "center" as const };
+// `paddingHorizontal: 20` matches the "Adabiyotlar" heading above, so the first
+// chip of BOTH rows starts on the same line as the title. The vertical padding
+// is what keeps the "Eng yangi" halo from being clipped by the horizontal
+// ScrollView on Android — with 7 top and bottom the two rows sit 14pt apart,
+// in proportion to the 10pt gap between chips.
+const chipRowStyle = { paddingHorizontal: 20, paddingVertical: 7, gap: 10, alignItems: "center" as const };
 
 const styles = StyleSheet.create({
-  latestChipWrap: { paddingHorizontal: 3 },
+  // No padding: any inset here would push the second row out of line with the
+  // first. The glow bleeds outwards via negative insets instead.
+  latestChipWrap: {},
   latestChipGlow: {
     position: "absolute",
-    top: 1,
-    left: 5,
-    right: 5,
-    bottom: 1,
+    top: 0,
+    left: 2,
+    right: 2,
+    bottom: 0,
     borderRadius: 20,
     shadowOpacity: 0.6,
     shadowRadius: 11,
@@ -743,14 +758,30 @@ const styles = StyleSheet.create({
   },
 });
 
+/**
+ * One chip size for every chip in both rows.
+ *
+ * `height` (not paddingVertical) so a 13pt icon and a 14pt one can never make
+ * two chips different heights, and min/maxWidth so the row reads as a set of
+ * equal buttons instead of ragged text pills. Labels longer than `CHIP_MAX_W`
+ * are truncated with "…" by the Text itself (`numberOfLines`), which is why the
+ * width can be capped without breaking a long taxonomy name.
+ */
+const CHIP_HEIGHT = 40;
+const CHIP_MIN_W = 108;
+const CHIP_MAX_W = 164;
+
 function chipBase(L: AppTheme) {
   return {
     flexDirection: "row" as const,
     alignItems: "center" as const,
-    gap: 5,
+    justifyContent: "center" as const,
+    gap: 6,
     paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
+    height: CHIP_HEIGHT,
+    minWidth: CHIP_MIN_W,
+    maxWidth: CHIP_MAX_W,
+    borderRadius: CHIP_HEIGHT / 2,
     borderWidth: 1.5,
     borderColor: L.border,
     backgroundColor: L.bgCard,
@@ -761,6 +792,9 @@ function chipBase(L: AppTheme) {
     elevation: 1,
   };
 }
+
+/** Shared label style — `flexShrink` is what lets the "…" actually appear. */
+const chipLabel = { fontSize: 12.5, flexShrink: 1 as const };
 
 function lastReadCardBase(L: AppTheme, framed = false) {
   return {
@@ -1191,7 +1225,7 @@ function MobileHomeScreen() {
         ) : null}
 
         {/* ── KATEGORIYA CHIPS ("Eng yangi" + content_categories) ─────────────── */}
-        <SlideFromRight delay={460} style={{ marginTop: 4 }}>
+        <SlideFromRight delay={460}>
           <ChipRow
             cats={categoryChips}
             active={activeCat}
