@@ -9,7 +9,10 @@
 -- Postgres catalog: every single-column foreign key in `public` that points at
 -- `auth.users(id)` or `public.profiles(id)` is treated as "this row belongs to
 -- that user" and deleted — except the moderation/audit columns listed in
--- ADMIN_COLUMNS, which record who ACTED on a row rather than who owns it.
+-- ADMIN_COLUMNS, which record who ACTED on a row rather than who owns it, and
+-- the published catalogue (PUBLISHED_TABLES / UNLINK_TABLES), which outlives its
+-- author. Taking published material down is an admin-only act, never a
+-- side effect of someone closing their own account.
 -- That way a table added later is covered automatically and this file never
 -- goes stale.
 --
@@ -181,6 +184,19 @@ declare
   -- say, settled payment rows, add the table name here (the FK to the deleted
   -- auth user is `on delete set null` / `cascade`, so it resolves itself).
   KEEP_TABLES constant text[] := array[]::text[];
+  -- The published catalogue. A reader closing their account must never take a
+  -- published book, article, poem, screenplay or reel down with them: those
+  -- rows stay and only lose the link to the person. Removing published material
+  -- is an ADMIN-ONLY act, done from the panel
+  -- (admin_cleanup_user_data(..., p_delete_published => true)); this function
+  -- has no way to do it. Unpublished drafts are personal and still deleted.
+  PUBLISHED_TABLES constant text[] := array[
+    'books', 'articles', 'poems', 'screenplays', 'reels', 'audio_files'
+  ];
+  -- `authors` / `publishers` are the records published works point at; deleting
+  -- them would orphan the catalogue, so they are only unlinked.
+  UNLINK_TABLES constant text[] := array['authors', 'publishers'];
+  col_nullable text;
   rec          record;
   pending      text[] := '{}';
   next_pending text[];
@@ -232,8 +248,35 @@ begin
     foreach item in array pending loop
       parts := string_to_array(item, '|');
       begin
-        execute format('delete from public.%I where %I = $1', parts[1], parts[2])
-          using p_user_id;
+        if parts[1] = any (UNLINK_TABLES) then
+          -- Shared records: drop the link, keep the row.
+          execute format('update public.%I set %I = null where %I = $1',
+                         parts[1], parts[2], parts[2])
+            using p_user_id;
+        elsif parts[1] = any (PUBLISHED_TABLES) then
+          -- Published rows survive with a null owner; anything else is a draft
+          -- and belongs to the person, so it goes.
+          select c.is_nullable into col_nullable
+            from information_schema.columns c
+           where c.table_schema = 'public'
+             and c.table_name = parts[1]
+             and c.column_name = parts[2];
+
+          if col_nullable = 'YES' then
+            execute format(
+              'update public.%I set %I = null where %I = $1 and status::text = %L',
+              parts[1], parts[2], parts[2], 'published'
+            ) using p_user_id;
+          end if;
+
+          execute format(
+            'delete from public.%I where %I = $1 and status::text <> %L',
+            parts[1], parts[2], 'published'
+          ) using p_user_id;
+        else
+          execute format('delete from public.%I where %I = $1', parts[1], parts[2])
+            using p_user_id;
+        end if;
         get diagnostics affected = row_count;
         if affected > 0 then
           total := total + affected;
