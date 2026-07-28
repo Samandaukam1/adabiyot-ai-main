@@ -20,19 +20,89 @@
 -- Proof that a deletion happened, for support / App Review questions. It holds
 -- NO personal data: the account is identified only by a SHA-256 hash of its id,
 -- which cannot be reversed into an account that no longer exists.
+--
+-- ONE table records both directions — a user deleting themselves and an admin
+-- deleting someone from the panel — so support can answer "what happened to
+-- this account?" from a single place. `actor_type` says which it was. The shape
+-- below is the one already live on the project (and in the admin panel's
+-- supabase/account-deletion-admin-migration.sql); the create is a no-op there.
+do $$
+begin
+  if not exists (select 1 from pg_type where typname = 'account_deletion_actor_type') then
+    create type public.account_deletion_actor_type as enum ('self', 'admin', 'system');
+  end if;
+  if not exists (select 1 from pg_type where typname = 'account_deletion_status') then
+    create type public.account_deletion_status as enum
+      ('pending', 'processing', 'completed', 'failed', 'cancelled');
+  end if;
+end $$;
+
 create table if not exists public.account_deletion_audit (
   id uuid primary key default gen_random_uuid(),
-  user_id_hash text not null,
-  deleted_at timestamptz not null default now(),
-  rows_deleted jsonb not null default '{}'::jsonb,
-  client text
+  deleted_user_id uuid not null,
+  actor_type public.account_deletion_actor_type not null,
+  actor_user_id uuid,
+  masked_identifier text,
+  identifier_hash text,
+  reason text,
+  status public.account_deletion_status not null default 'pending',
+  request_ip_hash text,
+  user_agent_hash text,
+  error_code text,
+  error_message_safe text,
+  metadata jsonb not null default '{}'::jsonb,
+  requested_at timestamptz not null default now(),
+  processing_started_at timestamptz,
+  completed_at timestamptz,
+  failed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 
 create index if not exists account_deletion_audit_deleted_at_idx
-  on public.account_deletion_audit (deleted_at desc);
+  on public.account_deletion_audit (completed_at desc);
 
 alter table public.account_deletion_audit enable row level security;
--- No policies at all: only the service role (Edge Function) may read or write.
+-- No policy is granted here: only the service role (Edge Function) writes. The
+-- admin panel's migration adds an admin-only read policy on top.
+
+-- The self-deletion writer. A function rather than a direct insert from the
+-- Edge Function, so the column names live in exactly one place and a schema
+-- change can never silently turn the audit into a no-op.
+create or replace function public.record_self_account_deletion(
+  p_user_id uuid,
+  p_user_id_hash text,
+  p_rows jsonb default '{}'::jsonb,
+  p_client text default null
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_id uuid;
+begin
+  insert into public.account_deletion_audit (
+    deleted_user_id, actor_type, actor_user_id, identifier_hash,
+    status, metadata, requested_at, processing_started_at, completed_at
+  )
+  values (
+    p_user_id, 'self', p_user_id, p_user_id_hash,
+    'completed',
+    jsonb_build_object('source', 'delete-own-account', 'client', p_client)
+      || jsonb_build_object('rows_deleted', coalesce(p_rows, '{}'::jsonb)),
+    now(), now(), now()
+  )
+  returning id into v_id;
+
+  return v_id;
+end;
+$$;
+
+revoke all on function public.record_self_account_deletion(uuid, text, jsonb, text) from public;
+revoke all on function public.record_self_account_deletion(uuid, text, jsonb, text) from anon, authenticated;
+grant execute on function public.record_self_account_deletion(uuid, text, jsonb, text) to service_role;
 
 /* ─────────────────  one deletion per account at a time  ──────────────── */
 

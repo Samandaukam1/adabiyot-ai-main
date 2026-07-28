@@ -139,10 +139,13 @@ Deno.serve(async (req) => {
     }
 
     // ── 5. Audit (no PII) ─────────────────────────────────────────────────
-    const { error: auditError } = await admin.from("account_deletion_audit").insert({
-      user_id_hash: await hashUserId(userId),
-      rows_deleted: report ?? {},
-      client: req.headers.get("x-client-info") ?? null,
+    // Written through the RPC, not a raw insert: the audit table is shared with
+    // the admin panel's deletion trail, and the function owns the column names.
+    const { error: auditError } = await admin.rpc("record_self_account_deletion", {
+      p_user_id: userId,
+      p_user_id_hash: await hashUserId(userId),
+      p_rows: report ?? {},
+      p_client: req.headers.get("x-client-info") ?? null,
     });
     // The account IS gone at this point — a failed audit insert must not turn a
     // successful deletion into an error for the user.
