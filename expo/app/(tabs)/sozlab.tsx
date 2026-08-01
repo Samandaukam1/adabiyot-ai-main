@@ -1475,10 +1475,11 @@ function CommentSheet({
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.sheetBackdrop}>
         <Pressable style={styles.sheetDismiss} onPress={onClose} />
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-          style={styles.sheetKeyboard}
-        >
+        {/* `padding` on Android too: the app runs edge-to-edge, so the system no
+            longer resizes the window for the keyboard and the input bar would
+            stay hidden behind it. When a window *does* resize, RN's own frame
+            measurement returns 0 here, so nothing shifts twice. */}
+        <KeyboardAvoidingView behavior="padding" style={styles.sheetKeyboard}>
           <View style={[styles.sheet, { paddingBottom: Math.max(bottomInset, 4) + 8 }]}>
             <View style={styles.sheetHandle} />
             <View style={styles.sheetHeader}>
@@ -2501,8 +2502,12 @@ function createStyles(c: AppTheme) {
     actionText: { color: c.textMuted, fontSize: 13 },
     sheetBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: c.isDark ? "rgba(0,0,0,0.6)" : "rgba(13,27,42,0.26)" },
     sheetDismiss: { flex: 1 },
-    sheetKeyboard: { width: "100%" },
+    // `flexShrink` down the sheet → list chain: when the keyboard leaves less
+    // room than the sheet wants, the comment list gives up the height instead of
+    // the input bar sliding off the bottom of the screen.
+    sheetKeyboard: { width: "100%", flexShrink: 1 },
     sheet: {
+      flexShrink: 1,
       backgroundColor: c.bgGlass,
       borderTopLeftRadius: 20,
       borderTopRightRadius: 20,
@@ -2719,7 +2724,7 @@ function createStyles(c: AppTheme) {
       borderColor: c.border,
     },
     commentPostText: { color: c.textDim, fontSize: 13, lineHeight: 18, marginTop: 3, fontWeight: "500" },
-    commentList: { maxHeight: 320, paddingHorizontal: 16, paddingTop: 10 },
+    commentList: { maxHeight: 320, flexShrink: 1, paddingHorizontal: 16, paddingTop: 10 },
     commentEmpty: { color: c.textMuted, fontSize: 14, textAlign: "center", paddingVertical: 28 },
     commentRow: { flexDirection: "row", gap: 10, marginBottom: 14 },
     commentAvatar: { width: 34, height: 34, borderRadius: 17, backgroundColor: c.bgElevated },

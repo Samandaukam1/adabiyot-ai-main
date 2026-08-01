@@ -92,7 +92,12 @@ export default function BookPurchaseCta({
           ) : (
             <ShoppingCart color="#fff" size={19} />
           )}
-          <Text style={styles.buttonText} numberOfLines={1}>
+          <Text
+            style={styles.buttonText}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.8}
+          >
             {label}
           </Text>
         </LinearGradient>
@@ -105,13 +110,17 @@ export default function BookPurchaseCta({
 
 function createStyles(c: AppTheme, isDark: boolean) {
   return StyleSheet.create({
-    wrap: { width: "100%" },
+    // `alignSelf: "stretch"` — NOT `width: "100%"`: percentage widths ignore the
+    // caller's margins, so a `marginHorizontal` wrapper pushed the button 40pt
+    // past the right edge of the screen. Stretching fills the parent minus the
+    // margins instead, on every screen width.
+    wrap: { alignSelf: "stretch", maxWidth: "100%" },
     button: {
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "center",
       gap: 10,
-      paddingHorizontal: 26,
+      paddingHorizontal: 18,
       paddingVertical: 16,
       borderRadius: 16,
       shadowColor: "#11998E",
@@ -121,7 +130,9 @@ function createStyles(c: AppTheme, isDark: boolean) {
       elevation: 4,
     },
     buttonDisabled: { opacity: 0.6 },
-    buttonText: { color: "#fff", fontSize: 16, fontWeight: "800", letterSpacing: 0.2 },
+    // `flexShrink` keeps the price label inside the row on narrow phones instead
+    // of pushing the cart icon out of the button.
+    buttonText: { flexShrink: 1, color: "#fff", fontSize: 16, fontWeight: "800", letterSpacing: 0.2 },
     note: { color: c.textMuted, fontSize: 13, lineHeight: 19, marginTop: 10 },
   });
 }

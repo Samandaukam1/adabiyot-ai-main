@@ -20,7 +20,9 @@
         "UIBackgroundModes": [
           "audio"
         ],
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSPhotoLibraryUsageDescription": "AdabiyotX accesses your photo library so you can select and upload a profile picture. The app only accesses the photo you choose.",
+        "NSCameraUsageDescription": "AdabiyotX uses your camera so you can take and upload a profile picture."
       }
     },
     "android": {
@@ -29,6 +31,7 @@
         "backgroundColor": "#F7F4ED"
       },
       "package": "uz.adabiyotx.app",
+      "softwareKeyboardLayoutMode": "resize",
       "permissions": [
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
@@ -68,6 +71,14 @@
       ],
       "expo-font",
       "expo-web-browser",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "AdabiyotX accesses your photo library so you can select and upload a profile picture. The app only accesses the photo you choose.",
+          "cameraPermission": "AdabiyotX uses your camera so you can take and upload a profile picture.",
+          "microphonePermission": false
+        }
+      ],
       "expo-video",
       "expo-apple-authentication",
       [

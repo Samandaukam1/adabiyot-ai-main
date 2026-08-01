@@ -1069,8 +1069,12 @@ function ReelCommentMode({
         </Pressable>
       </View>
 
-      {/* Comments panel */}
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
+      {/* Comments panel.
+          `padding` is used on Android too: the app runs edge-to-edge, so the
+          system no longer resizes the window for the keyboard and the input bar
+          would stay hidden behind it. When a window *does* resize, RN's own
+          frame measurement returns 0 here, so nothing shifts twice. */}
+      <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
         <View style={[styles.commentPanel, { backgroundColor: c.bgElevated }]}>
           <View style={[styles.sheetGrabber, { backgroundColor: c.borderStrong }]} />
           <View style={styles.commentHeader}>
@@ -1291,7 +1295,7 @@ function ReelAttachSheet({
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.sheetBackdrop}>
         <Pressable style={styles.sheetDismiss} onPress={onClose} />
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.sheetKeyboard}>
+        <KeyboardAvoidingView behavior="padding" style={styles.sheetKeyboard}>
           <View style={[styles.attachSheet, { backgroundColor: c.bgElevated, paddingBottom: Math.max(insets.bottom, 6) + 10 }]}>
             <View style={[styles.sheetGrabber, { backgroundColor: c.borderStrong }]} />
             <View style={styles.commentHeader}>
